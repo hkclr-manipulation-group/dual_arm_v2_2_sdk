@@ -12,9 +12,9 @@
 #define CUARM_GRIPPER_ENCODER_RESOLUTION 16384
 #define CUARM_GRIPPER_DIRECTION 1
 
-// Calibrated output-shaft positions.
-#define CUARM_GRIPPER_OPEN_POSITION_DEG (-67.095001F)
-#define CUARM_GRIPPER_CLOSE_POSITION_DEG 5.132000F
+// Default calibrated output-shaft positions (overridden per gripper in yaml).
+#define CUARM_GRIPPER_DEFAULT_OPEN_POSITION_DEG (-67.095001F)
+#define CUARM_GRIPPER_DEFAULT_CLOSE_POSITION_DEG 5.132000F
 #define CUARM_GRIPPER_POSITION_TOLERANCE_DEG 0.25F
 
 // Public SDK ranges and physical full-scale mappings.
