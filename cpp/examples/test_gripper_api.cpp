@@ -84,18 +84,18 @@ int main() {
         std::cout << "set_gripper_config: " << ret_code_name(code) << '\n';
         if (code != RetCode::SUCCESS) return 1;
 
-        if (!wait_for_enter("Open the gripper to position 1000.")) return 0;
+        if (!wait_for_enter("Open the gripper to position 0.")) return 0;
         code = api.set_gripper_position(
-            Group::LEFT_ARM, 1000, true, 10);
+            Group::LEFT_ARM, 0, true, 10);
         std::cout << "set_gripper_position(open): "
                   << ret_code_name(code) << '\n';
         if (code != RetCode::SUCCESS || !print_state(api)) return 1;
 
         if (!wait_for_enter(
-                "Close the gripper to position 0; contact torque can finish the command early."))
+                "Close the gripper to position 1000; contact torque can finish the command early."))
             return 0;
         code = api.set_gripper_position(
-            Group::LEFT_ARM, 0, true, 10);
+            Group::LEFT_ARM, 1000, true, 10);
         std::cout << "set_gripper_position(close): "
                   << ret_code_name(code) << '\n';
         if (code != RetCode::SUCCESS || !print_state(api)) return 1;

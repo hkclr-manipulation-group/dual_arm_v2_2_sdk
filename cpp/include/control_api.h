@@ -58,7 +58,7 @@ public:
     std::vector<float> get_joint_max_limit(Group group) const;
     std::vector<float> get_joint_min_limit(Group group) const;
 
-    // Gripper values are normalized integers: position 0=closed, 1000=open;
+    // Gripper values are normalized integers: position 0=open, 1000=closed;
     // speed 1..1000 maps to 0.36..360 deg/s; force 1..1000 maps to
     // 0.001..1.0 Nm. LEFT_ARM maps to gripperL, RIGHT_ARM to gripperR.
     RetCode set_gripper_config(Group group, uint16_t speed, uint16_t force,

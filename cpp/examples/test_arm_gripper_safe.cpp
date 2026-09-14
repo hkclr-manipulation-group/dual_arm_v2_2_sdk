@@ -40,8 +40,8 @@ constexpr std::array<float, 7> kHomeJointsDeg = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0
 constexpr float kMaxSpeedDegS = 20.0F;
 constexpr float kVelocityGuardDegS = 35.0F;
 
-constexpr uint16_t kGripperOpen = 1000;
-constexpr uint16_t kGripperClosed = 0;
+constexpr uint16_t kGripperOpen = 0;
+constexpr uint16_t kGripperClosed = 1000;
 constexpr uint16_t kGripperSpeed = 400;
 constexpr uint16_t kGripperForce = 400;
 constexpr int kGripperTimeoutSeconds = 10;

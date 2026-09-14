@@ -24,8 +24,8 @@ using example::wait_for_enter;
 
 namespace {
 
-constexpr uint16_t kGripperOpen = 1000;
-constexpr uint16_t kGripperClosed = 0;
+constexpr uint16_t kGripperOpen = 0;
+constexpr uint16_t kGripperClosed = 1000;
 constexpr uint16_t kGripperSpeed = 400;
 constexpr uint16_t kGripperForce = 500;
 constexpr int kGripperTimeoutSeconds = 10;
