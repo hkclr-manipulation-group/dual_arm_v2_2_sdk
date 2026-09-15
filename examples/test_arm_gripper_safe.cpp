@@ -4,7 +4,7 @@
  *
  * 在文件顶部修改目标关节角（度）。需配置 robot.gripper。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_arm_gripper_safe
  */
 
@@ -24,7 +24,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::kRadToDeg;
 using example::ret_code_name;
@@ -237,7 +237,7 @@ bool move_gripper(ControlApi& api, uint16_t position, const char* label) {
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> current;
 
         const std::vector<float> pose1 = joints_deg_to_rad(kPose1JointsDeg);

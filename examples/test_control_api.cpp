@@ -2,7 +2,7 @@
  * @file test_control_api.cpp
  * @brief SDK 交互式冒烟测试：组控制、关节读写、低/高跟随、速度限位。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_control_api          # 默认不主动运动
  *   ./test_control_api 0.01     # J1 偏移 +0.01 rad 的小幅运动测试
  */
@@ -24,7 +24,7 @@ using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
 using dual_arm_v2_2_sdk::State;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::ret_code_name;
 using example::wait_for_joint_state;
@@ -183,7 +183,7 @@ bool wait_until_target(ControlApi& api, const VelocityGuard& velocity_guard,
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> current;
         std::cout << "Waiting for rt_control state...\n";
         if (!wait_for_joint_state(api, Group::LEFT_ARM, current, 3000)) {

@@ -2,7 +2,7 @@
  * @file test_gripper_api.cpp
  * @brief 单夹爪 API 交互测试（需 config.yaml 中配置 robot.gripper）。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_gripper_api
  */
 
@@ -17,7 +17,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::ret_code_name;
 using example::wait_for_enter;
 
@@ -37,7 +37,7 @@ bool print_state(ControlApi& api) {
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::cout << "Waiting for rt_control gripper state...\n";
         bool received = false;
         RetCode last_gripper_code = RetCode::RECEIVE_FAILED;

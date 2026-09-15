@@ -2,7 +2,7 @@
  * @file test_dual_gripper_api.cpp
  * @brief 双臂夹爪 API 交互测试（左/右各一个 gripper）。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_dual_gripper_api
  */
 
@@ -18,7 +18,7 @@ using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
 using example::group_name;
-using example::kConfigPath;
+using example::default_config_path;
 using example::ret_code_name;
 using example::wait_for_enter;
 
@@ -97,7 +97,7 @@ bool test_one_gripper(ControlApi& api, Group group, const char* stage_prefix) {
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::cout << "Dual gripper test (LEFT + RIGHT)\n"
                   << "Prerequisites:\n"
                   << "  1. dual_v2_2_rt_control is running with with_gripper config\n"

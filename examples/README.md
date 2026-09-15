@@ -1,16 +1,16 @@
 # SDK 示例程序
 
-所有可执行文件在 **`cpp/build/`** 目录下运行。共享工具见 [`example_common.h`](example_common.h)（配置路径、等待 rt_control、RetCode 名称等）。
+可执行文件位于 **`build/bin/`**，在 **`build/`** 或 **`build/bin/`** 下运行均可（如 `./bin/go_home` 或 `./go_home`）。共享工具见 [`example_common.h`](example_common.h)（`default_config_path()`、等待 rt_control、RetCode 名称等）。
 
 ## 前置条件
 
-1. 启动 `rt_control`，加载 `cuarm_configuration/dual_v2_2/config.yaml`
+1. 启动 `rt_control`，加载本仓库 `cuarm_configuration/dual_v2_2/config.yaml`
 2. 编译 SDK：
 
 ```bash
-cmake -S cpp -B cpp/build
-cmake --build cpp/build -j
-cd cpp/build
+cmake -S . -B build
+cmake --build build -j
+cd build    # 或 cd build/bin
 ```
 
 3. **无需启动 panel** — SDK 通过 UDP 直接向 `rt_control` 发送指令
@@ -55,7 +55,7 @@ cd cpp/build
 
 ```bash
 ./teach_replay
-./teach_replay ../examples/teach_points_left_right.txt
+./teach_replay ../../examples/teach_points_left_right.txt
 ```
 
 **示教数据文件**
@@ -99,10 +99,10 @@ cd cpp/build
 #include "control_api.h"
 
 int main() {
-    // 路径相对 cpp/build/
-    dual_arm_v2_2_sdk::ControlApi api("../../../cuarm_configuration/dual_v2_2");
+    // 示例程序用 default_config_path()；集成时建议传绝对路径
+    dual_arm_v2_2_sdk::ControlApi api("/path/to/dual_arm_v2_2_sdk/cuarm_configuration/dual_v2_2");
     // ...
 }
 ```
 
-完整 API 见 [`../include/control_api.h`](../include/control_api.h) 与 [`../../doc/`](../doc/) 接口文档。
+完整 API 见 [`../cpp/include/control_api.h`](../cpp/include/control_api.h) 与 [`../doc/`](../doc/) 接口文档。

@@ -8,7 +8,7 @@
  * Part 1：单次曲线拟合，radio=20（快）vs radio=100（平滑），仅 J1 运动
  * Part 2：低速路点流（间隔 = 1.2 * acc_time）
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_move_joint_curve_fit
  */
 
@@ -28,7 +28,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::kRadToDeg;
 using example::ret_code_name;
@@ -309,7 +309,7 @@ bool stream_curve_fit_waypoints(ControlApi& api, const VelocityGuard& guard,
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> home_pose;
         std::cout << "move_joint curve-fit mode test (trajectory_mode=1)\n"
                   << "Waiting for rt_control state...\n";

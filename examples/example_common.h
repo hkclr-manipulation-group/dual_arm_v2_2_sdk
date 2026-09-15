@@ -4,6 +4,7 @@
 #include "control_api.h"
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -11,8 +12,46 @@
 
 namespace example {
 
-// Path is relative to running binaries from cpp/build/.
-constexpr const char* kConfigPath = "../../../cuarm_configuration/dual_v2_2";
+inline std::filesystem::path executable_directory() {
+#if defined(__linux__)
+    return std::filesystem::read_symlink("/proc/self/exe").parent_path();
+#else
+    return std::filesystem::current_path();
+#endif
+}
+
+// Resolve paths from the executable location so examples work from build/ or build/bin/.
+inline std::string default_config_path() {
+    namespace fs = std::filesystem;
+    const fs::path exe_dir = executable_directory();
+    const std::vector<fs::path> candidates = {
+        exe_dir / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
+        exe_dir / ".." / "cuarm_configuration" / "dual_v2_2",
+    };
+    for (const auto& dir : candidates) {
+        std::error_code ec;
+        if (fs::exists(dir / "config.yaml", ec)) {
+            return fs::weakly_canonical(dir).string();
+        }
+    }
+    return fs::weakly_canonical(candidates.front()).string();
+}
+
+inline std::string default_teach_file_path() {
+    namespace fs = std::filesystem;
+    const fs::path exe_dir = executable_directory();
+    const std::vector<fs::path> candidates = {
+        exe_dir / ".." / ".." / "examples" / "teach_points_left_right.txt",
+        exe_dir / ".." / "examples" / "teach_points_left_right.txt",
+    };
+    for (const auto& file : candidates) {
+        std::error_code ec;
+        if (fs::exists(file, ec)) {
+            return fs::weakly_canonical(file).string();
+        }
+    }
+    return fs::weakly_canonical(candidates.front()).string();
+}
 constexpr int kDefaultStateTimeoutMs = 3000;
 constexpr float kPi = 3.14159265358979323846F;
 constexpr float kDegToRad = kPi / 180.0F;

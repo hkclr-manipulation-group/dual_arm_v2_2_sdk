@@ -2,7 +2,7 @@
 
 本仓库提供 **Dual Arm V2.2 的 C++ 客户端控制 API**。SDK 通过 UDP 与实时控制服务 `rt_control` 通信，向机器人下发运动与夹爪指令，并接收关节/夹爪状态反馈。
 
-> **重要说明**：本仓库**不能单独运行**。它只包含客户端 SDK 与示例程序；实际驱动机器人还需要 **`cuarm_rt_control`**（生成 `dual_v2_2_rt_control` 可执行文件）和 **`cuarm_configuration`**（机器人配置与 URDF）。编译 SDK 本身还依赖同级的 **`robot_platform_utils`** 与 **`curi_udp`**。
+> **重要说明**：本仓库包含客户端 SDK、示例程序与 **`dual_v2_2` 运行时配置**（`cuarm_configuration/`）。实际驱动机器人还需要 **`cuarm_rt_control`**（生成 `dual_v2_2_rt_control` 可执行文件）。编译 SDK 依赖本仓库内的 **`robot_platform_utils`** 与 **`curi_udp`** 子模块。
 
 接口定义见 [`cpp/include/control_api.h`](cpp/include/control_api.h)。
 
@@ -12,11 +12,10 @@
 
 | 组件 | 是否包含在本仓库 | 作用 |
 | --- | --- | --- |
-| `dual_arm_v2_2_sdk`（本仓库） | ✅ | C++ 控制 API、示例程序 |
+| `dual_arm_v2_2_sdk`（本仓库） | ✅ | C++ 控制 API、示例程序、`cuarm_configuration/dual_v2_2` 配置 |
 | `cuarm_rt_control` | ❌ 需另行获取 | 实时控制服务（`dual_v2_2_rt_control`） |
-| `cuarm_configuration` | ❌ 需另行获取 | 机器人参数、URDF、网络端口等 |
-| `robot_platform_utils` | ❌ 需另行获取 | 配置加载、UDP 消息协议（编译依赖） |
-| `curi_udp` | ❌ 需另行获取 | UDP 通信库（编译依赖） |
+| `robot_platform_utils` | ✅ 子模块 | 配置加载、UDP 消息协议（编译依赖） |
+| `curi_udp` | ✅ 子模块 | UDP 通信库（编译依赖） |
 | `cuarm_upper_software`（panel） | ❌ 不需要 | 图形操作面板；**使用 SDK 时无需启动** |
 
 数据流：
@@ -35,15 +34,14 @@
 | --- | --- | --- |
 | [CMake](https://cmake.org/download/) | ≥ 3.16 | 构建系统 |
 | C++ 编译器 | C++17 | GCC / Clang |
-| [yaml-cpp](https://github.com/jbeder/yaml-cpp) | 0.8.0 | 读取 `config.yaml` |
-| [robot_platform_utils](https://github.com/hkclr-manipulation-group/robot_platform_utils) | — | 须与本仓库处于**同一工作区根目录** |
-| [curi_udp](https://github.com/CURI-Simulation-and-Software-Group/curi_udp) | — | 同上，须为同级目录 |
+| [yaml-cpp](https://github.com/jbeder/yaml-cpp) | 系统包即可 | **仅编译本 SDK 时需要**；链入 `libdual_arm_v2_2_control_sdk.so`，上层集成方无需安装 dev 包 |
+| [robot_platform_utils](https://github.com/hkclr-manipulation-group/robot_platform_utils) | — | 本仓库子模块 |
+| [curi_udp](https://github.com/CURI-Simulation-and-Software-Group/curi_udp) | — | 本仓库子模块 |
 
-Ubuntu 快速安装 yaml-cpp：
+编译本仓库时：
 
 ```bash
 sudo apt-get install libyaml-cpp-dev
-# 或从源码安装，见 robot_platform_utils/README.md
 ```
 
 ### 运行示例 / 集成所需（运行时）
@@ -51,7 +49,7 @@ sudo apt-get install libyaml-cpp-dev
 | 依赖 | 说明 |
 | --- | --- |
 | [cuarm_rt_control](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control) | 编译产物 `dual_v2_2_rt_control`；详见其 README 与 `cuarm_robotics/README.md` |
-| [cuarm_configuration](https://github.com/CURI-Simulation-and-Software-Group/cuarm_configuration) | 使用 `dual_v2_2/` 配置目录 |
+| 本仓库 `cuarm_configuration/dual_v2_2/` | 机器人参数、URDF、网络端口等 |
 | 机器人硬件或仿真 | 由 `config.yaml` 中 `rt_control.hardware_simulation` 控制 |
 
 ### 编译 rt_control 所需（构建 `dual_v2_2_rt_control`）
@@ -60,7 +58,7 @@ sudo apt-get install libyaml-cpp-dev
 | --- | --- |
 | Pinocchio、Eigen3、Boost、urdfdom 等 | 详见 [`cuarm_robotics/README.md`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control/blob/main/cuarm_robotics/README.md) |
 | `cuarm_robotics` | `cuarm_rt_control` 子模块 |
-| `robot_platform_utils`、`curi_udp`/`curi_tcp` | 与工作区根目录同级 |
+| `robot_platform_utils`、`curi_udp`/`curi_tcp` | 通常与 `cuarm_rt_control` 同级；本 SDK 已自带对应子模块 |
 | `gripper/` 目录 | **编译时必需**（CMake 固定引用，与运行时是否启用夹爪无关） |
 
 `gripper/` 须包含以下三个子目录：
@@ -75,60 +73,42 @@ sudo apt-get install libyaml-cpp-dev
 
 ---
 
-## 工作区目录布局
-
-`cpp/CMakeLists.txt` 将 SDK 上两级目录（`../..`）视为**工作区根目录**，并在该根目录下查找 `robot_platform_utils` 与 `curi_udp`。请按如下结构组织：
+## 仓库目录布局
 
 ```text
-<workspace>/
-├── dual_arm_v2_2_sdk/          # 本仓库（clone 后目录名可自定，但需保持相对位置）
-│   ├── cpp/
-│   ├── doc/
-│   └── README.md
-├── robot_platform_utils/       # 编译依赖
-├── curi_udp/                   # 编译依赖
+dual_arm_v2_2_sdk/
+├── CMakeLists.txt              # 构建入口（SDK + 示例）
+├── cpp/                        # SDK 库源码与头文件
+│   ├── include/
+│   └── src/
+├── examples/                   # 示例程序
 ├── cuarm_configuration/        # 运行时配置
 │   └── dual_v2_2/
 │       └── config.yaml
-├── cuarm_rt_control/           # 编译并运行 rt_control
-│   └── build/
-│       └── dual_v2_2_rt_control
-└── gripper/                    # 编译 rt_control 时必需（运行时启用夹爪才需 CAN 硬件）
-    ├── cxt_can/
-    ├── rmd_motor/
-    └── temp_spark2_gripper/
+├── robot_platform_utils/       # 子模块（编译依赖）
+├── curi_udp/                   # 子模块（编译依赖）
+├── doc/
+└── build/                      # 构建产物（out-of-source）
+    ├── bin/                    # 示例可执行文件
+    └── lib/                    # libdual_arm_v2_2_control_sdk.so
 ```
 
-### 推荐方式：克隆 monorepo
+`rt_control` 仍须单独获取并编译，例如与 SDK 放在同一工作区：
 
-若希望一次性获取全部相关仓库，可克隆 [`cuarm_panel_control`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_panel_control) monorepo（含 submodule），再将本 SDK 放入同级或替换其中的 `dual_arm_v2_2_sdk` 目录：
-
-```bash
-git clone --recurse-submodules git@github.com:CURI-Simulation-and-Software-Group/cuarm_panel_control.git
-cd cuarm_panel_control
-
-# 若单独分发本 SDK，可在此目录下 clone：
-git clone git@github.com:hkclr-manipulation-group/dual_arm_v2_2_sdk.git
+```text
+<workspace>/
+├── dual_arm_v2_2_sdk/          # 本仓库
+└── cuarm_rt_control/           # 编译并运行 rt_control
+    └── build/
+        └── dual_v2_2_rt_control
 ```
 
-### 最小手动组装
-
-仅使用 SDK 时，至少 clone 以下仓库到同一 `<workspace>/` 下：
+克隆本仓库时请带上子模块：
 
 ```bash
-mkdir -p ~/cuarm_workspace && cd ~/cuarm_workspace
-
-git clone git@github.com:hkclr-manipulation-group/dual_arm_v2_2_sdk.git
-git clone git@github.com:hkclr-manipulation-group/robot_platform_utils.git
-git clone git@github.com:CURI-Simulation-and-Software-Group/curi_udp.git
-git clone git@github.com:CURI-Simulation-and-Software-Group/cuarm_configuration.git
-git clone --recurse-submodules git@github.com:CURI-Simulation-and-Software-Group/cuarm_rt_control.git
-
-# 编译 rt_control 还需要 gripper/ 目录（见上文「编译 rt_control 所需」）
-mkdir -p gripper && cd gripper
-git clone https://github.com/hkclr-manipulation-group/cxt_can.git
-git clone https://github.com/hkclr-manipulation-group/rmd_motor.git
-git clone https://github.com/hkclr-manipulation-group/temp_spark2_gripper.git
+git clone --recurse-submodules git@github.com:hkclr-manipulation-group/dual_arm_v2_2_sdk.git
+# 或已 clone 后：
+git submodule update --init --recursive
 ```
 
 构建 `rt_control` 请参考 [`cuarm_rt_control/README.md`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control/blob/main/README.md) 与 [`cuarm_robotics/README.md`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control/blob/main/cuarm_robotics/README.md)。
@@ -139,7 +119,7 @@ git clone https://github.com/hkclr-manipulation-group/temp_spark2_gripper.git
 
 ### 1. 配置
 
-编辑 `<workspace>/cuarm_configuration/dual_v2_2/config.yaml`：
+编辑本仓库 `cuarm_configuration/dual_v2_2/config.yaml`：
 
 - **无夹爪**：`robot.import_yaml: share/config/assembly/no_gripper.yaml`，不写 `robot.gripper`
 - **有夹爪**：配置 `robot.gripper` 并确保 CAN 硬件在线
@@ -152,30 +132,40 @@ git clone https://github.com/hkclr-manipulation-group/temp_spark2_gripper.git
 cd <workspace>/cuarm_rt_control/build
 sudo ./dual_v2_2_rt_control
 # 或显式指定配置目录：
-sudo ./dual_v2_2_rt_control /path/to/cuarm_configuration/dual_v2_2
+sudo ./dual_v2_2_rt_control /path/to/dual_arm_v2_2_sdk/cuarm_configuration/dual_v2_2
 ```
 
 ### 3. 编译并运行 SDK 示例
 
 ```bash
-cd <workspace>/dual_arm_v2_2_sdk
-cmake -S cpp -B cpp/build
-cmake --build cpp/build -j
-cd cpp/build
+cd dual_arm_v2_2_sdk
+cmake -S . -B build
+cmake --build build -j
 
-# 推荐第一步：验证通信
+# 在 build/ 或 build/bin/ 下运行均可
+cd build
+./bin/test_control_api    # 推荐第一步：验证通信
+./bin/go_home             # 双臂回零
+./bin/move_arms_demo      # 单臂/双臂运动演示
+
+# 等价写法
+cd build/bin
 ./test_control_api
-
-# 简单运动
 ./go_home
 ./move_arms_demo
 ```
 
-示例程序默认配置路径为 `../../../cuarm_configuration/dual_v2_2`（相对于 `cpp/build/` 运行）。若目录布局不同，请修改 [`cpp/examples/example_common.h`](cpp/examples/example_common.h) 中的 `kConfigPath`，或在集成时传入绝对路径。
+构建说明：
+
+- **禁止源码内构建**：请勿在仓库根目录直接 `cmake .`；始终使用 `-S . -B build`。
+- **关闭示例**（仅编译 SDK 库）：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_EXAMPLES=OFF`
+- **默认安装前缀**：`build/install`（`cmake --install build`）
+
+示例程序通过 [`examples/example_common.h`](examples/example_common.h) 中的 `default_config_path()` **按可执行文件位置**自动查找 `cuarm_configuration/dual_v2_2`，因此从 `build/` 或 `build/bin/` 启动都能找到配置。自定义布局时，可修改该函数，或在集成时向 `ControlApi` 传入绝对路径。
 
 **无需启动 panel** — SDK 绑定 `panel.ip:port` 接收状态，向 `rt_control.ip:port` 发送指令。
 
-更多示例说明见 **[`cpp/examples/README.md`](cpp/examples/README.md)**。
+更多示例说明见 **[`examples/README.md`](examples/README.md)**。
 
 ---
 
@@ -240,18 +230,49 @@ cutoff_hz = 20 * (1 / 20)^(radio / 999)
 ## 文档
 
 - 接口草案：[`doc/control_api_draft_20260902v1.pdf`](doc/control_api_draft_20260902v1.pdf)
-- 示例详解：[`cpp/examples/README.md`](cpp/examples/README.md)
+- 示例详解：[`examples/README.md`](examples/README.md)
 - rt_control 构建：[`cuarm_rt_control`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control)
 - 公共工具库：[`robot_platform_utils`](https://github.com/hkclr-manipulation-group/robot_platform_utils)
 
 ---
 
+## 常见问题
+
+| 现象 | 可能原因 | 处理 |
+| --- | --- | --- |
+| `OS failed to open input stream handle` / `bad conversion` | 找不到 `config.yaml` | 确认 `cuarm_configuration/dual_v2_2/config.yaml` 存在；集成时使用绝对路径 |
+| `No state received within 3 seconds` | `rt_control` 未启动或 UDP 地址/端口不匹配 | 启动 `dual_v2_2_rt_control`，并核对 `config.yaml` 中 `panel` / `rt_control` 的 `ip:port` |
+| 找不到 `libdual_arm_v2_2_control_sdk.so` | 动态库不在搜索路径 | 设置 `LD_LIBRARY_PATH` 指向 `build/lib` 或安装目录下的 `lib/` |
+
+---
+
 ## 集成到自己的项目
+
+先安装 SDK（动态库 + 头文件 + CMake 包）：
+
+```bash
+cd dual_arm_v2_2_sdk
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake --build build -j
+cmake --install build
+```
+
+若前缀不是系统默认路径，在自己的工程里带上 `CMAKE_PREFIX_PATH`（或设置 `dual_arm_v2_2_control_sdk_DIR`）。
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(my_app LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+
+find_package(dual_arm_v2_2_control_sdk REQUIRED)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE dual_arm_v2_2_control_sdk::dual_arm_v2_2_control_sdk)
+```
 
 ```cpp
 #include "control_api.h"
 
-dual_arm_v2_2_sdk::ControlApi api("/path/to/cuarm_configuration/dual_v2_2");
+dual_arm_v2_2_sdk::ControlApi api("/path/to/dual_arm_v2_2_sdk/cuarm_configuration/dual_v2_2");
 
 // 等待 rt_control
 std::vector<float> joints;
@@ -261,9 +282,12 @@ api.set_group(dual_arm_v2_2_sdk::Group::LEFT_ARM, true);
 api.move_joint(dual_arm_v2_2_sdk::Group::LEFT_ARM, target_rad, false);
 ```
 
-CMake 集成要点：
+`find_package` 只会带上 `Threads`。yaml-cpp 在编译 SDK 时已 **PRIVATE** 链入 `libdual_arm_v2_2_control_sdk.so`，上层工程不必安装或链接 yaml-cpp。部署时把 `lib/` 加入 `LD_LIBRARY_PATH`（或 `ldconfig`）即可；Ubuntu 上通常会把 `libyaml-cpp.a` 静态编进 SDK，运行时不再单独依赖 `libyaml-cpp.so`。
 
-1. 链接 `dual_arm_v2_2_control_sdk` 静态库（或直接引用其源文件，见 [`cpp/CMakeLists.txt`](cpp/CMakeLists.txt)）
-2. 包含目录：`cpp/include`、工作区根目录、`robot_platform_utils/cpp/include`、`curi_udp/c`
-3. 链接 `Threads::Threads` 与 `yaml-cpp::yaml-cpp`
-4. 确保 `robot_platform_utils` 与 `curi_udp` 与本仓库处于预期的同级目录，或自行调整 `REPOSITORY_ROOT` 逻辑
+不安装、直接把本仓库 `add_subdirectory` 也可以：
+
+```cmake
+add_subdirectory(path/to/dual_arm_v2_2_sdk)
+target_link_libraries(my_app PRIVATE dual_arm_v2_2_control_sdk)
+# 可选：-DDUAL_ARM_V2_2_SDK_BUILD_EXAMPLES=OFF
+```

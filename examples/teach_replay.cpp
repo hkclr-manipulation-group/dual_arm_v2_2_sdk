@@ -11,9 +11,10 @@
  *   idx, left_j1..j7, [left_gripper,] right_j1..j7, [right_gripper]
  *   支持 15 列（无夹爪）或 17 列（含夹爪；夹爪列会被解析但不回放）
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/ 或 build/bin/ 目录下均可）：
+ *   ./bin/teach_replay
  *   ./teach_replay
- *   ./teach_replay ../examples/teach_points_left_right.txt
+ *   ./bin/teach_replay /path/to/teach_points_left_right.txt
  */
 
 #include "control_api.h"
@@ -35,15 +36,14 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
+using example::default_teach_file_path;
 using example::kDegToRad;
 using example::kRadToDeg;
 using example::ret_code_name;
 using example::wait_for_joint_state;
 
 namespace {
-
-constexpr const char* kDefaultTeachFile = "../examples/teach_points_left_right.txt";
 
 constexpr float kMaxSpeedDegS = 50.0F;
 constexpr float kPositionToleranceDeg = 0.5F;
@@ -216,10 +216,6 @@ bool configure_arm_speed(ControlApi& api, Group group, std::size_t joint_count) 
     return true;
 }
 
-std::string default_teach_file_path() {
-    return std::string(kDefaultTeachFile);
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -227,7 +223,7 @@ int main(int argc, char* argv[]) {
         const std::string teach_file =
             argc > 1 ? argv[1] : default_teach_file_path();
 
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> left_current;
         std::vector<float> head_current;
 

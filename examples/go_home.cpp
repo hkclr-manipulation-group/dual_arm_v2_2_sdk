@@ -3,9 +3,10 @@
  * @brief 双臂回零：左/右臂各 7 关节置 0，头部保持当前角度。
  *
  * 前置条件：
- *   - rt_control 已启动，且 config.yaml 路径与 kConfigPath 一致
+ *   - rt_control 已启动，且 config.yaml 可被 default_config_path() 找到
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/ 或 build/bin/ 目录下均可）：
+ *   ./bin/go_home
  *   ./go_home
  */
 
@@ -18,11 +19,11 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::wait_for_joint_state;
 
 int main() {
-    ControlApi api(kConfigPath);
+    ControlApi api(default_config_path());
 
     std::vector<float> probe;
     if (!wait_for_joint_state(api, Group::LEFT_ARM, probe)) {

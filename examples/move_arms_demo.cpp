@@ -7,7 +7,7 @@
  *
  * 前置条件：rt_control 已启动。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./move_arms_demo
  */
 
@@ -26,7 +26,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::kRadToDeg;
 using example::wait_for_joint_state;
@@ -167,7 +167,7 @@ bool move_and_report(ControlApi& api, Group group, const std::vector<float>& com
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
 
         std::vector<float> left_now;
         std::vector<float> right_now;

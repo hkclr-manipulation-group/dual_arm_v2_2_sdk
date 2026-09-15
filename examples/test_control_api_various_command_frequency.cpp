@@ -2,7 +2,7 @@
  * @file test_control_api_various_command_frequency.cpp
  * @brief 高跟随模式下不同发送频率（20~30 Hz）的行为对比测试。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_control_api_various_command_frequency
  */
 
@@ -23,7 +23,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::kPi;
 using example::kRadToDeg;
@@ -186,7 +186,7 @@ bool send_variable_frequency_trajectory(
 
 int main() {
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> current;
         std::cout << "Waiting for rt_control state...\n";
         if (!wait_for_joint_state(api, Group::LEFT_ARM, current)) {
