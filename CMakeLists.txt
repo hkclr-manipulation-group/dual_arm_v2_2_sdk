@@ -50,6 +50,7 @@ if(DUAL_ARM_V2_2_SDK_BUILD_EXAMPLES)
     add_sdk_example(test_gripper_api)
     add_sdk_example(test_dual_gripper_api)
     add_sdk_example(test_arm_gripper_safe)
+    add_sdk_example(test_dual_arm_100hz_follow)
 
     unset(_dual_arm_example_dir)
 endif()
