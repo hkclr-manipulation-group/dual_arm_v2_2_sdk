@@ -37,7 +37,7 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::kConfigPath;
+using example::default_config_path;
 using example::kDegToRad;
 using example::kPi;
 using example::kRadToDeg;
@@ -668,7 +668,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        ControlApi api(kConfigPath);
+        ControlApi api(default_config_path());
         std::vector<float> left_now;
         std::vector<float> right_now;
         std::vector<float> head_now;

@@ -1,5 +1,5 @@
 panel:
-  mainwindow_size: [1000, 900]
+  mainwindow_size: [1500, 950]
   enable_ndi: false
   dt_send: 0.011
   dt_receive: 0.009 #Need to be faster than rt_control's sending frequency
@@ -43,6 +43,7 @@ curobo: {}
   # import_yaml: curobo/no_gripper.yaml
   # import_yaml: curobo/left_hand_right_gripper.yaml
 robot:
-  import_yaml: share/config/assembly/no_gripper.yaml
   # import_yaml: share/config/assembly/with_gripper.yaml
+  import_yaml: share/config/assembly/no_gripper.yaml
   # import_yaml: share/config/assembly/left_hand_right_gripper.yaml
+  # import_yaml: share/config/assembly/left_spark2_gripper_right_spark2_gripper.yaml
