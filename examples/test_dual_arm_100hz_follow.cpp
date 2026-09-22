@@ -1,21 +1,24 @@
 /**
  * @file test_dual_arm_100hz_follow.cpp
- * @brief 复现：左右臂各自 100 Hz 高跟随读写时，双臂同时动左臂明显变慢。
+ * @brief 左右臂各自 100 Hz 高跟随读写测试
  *
  * 对齐 ros2_control JointGroupBase 的调用方式：
  *   read : get_joint / get_joint_velocity / get_group_state
  *   write: move_joint(group, cmd, follow=true, trajectory_mode=2, radio=999)
  *
- * 轨迹：左右臂每轴都 +20 deg（相同指令）；到位后双臂同时回零。
+ * 轨迹：从当前姿态平滑偏移到目标（相对起始角 +deg）；到位后双臂同时回零。
  *
- * 用法（在 cpp/build/ 目录下）：
+ * 用法（在 build/bin/ 目录下）：
  *   ./test_dual_arm_100hz_follow              # 交互：left -> right -> both
  *   ./test_dual_arm_100hz_follow left
- *   ./test_dual_arm_100hz_follow right
- *   ./test_dual_arm_100hz_follow both         # 左右独立 move_joint，间隔 10ms 以免丢包
- *   ./test_dual_arm_100hz_follow both-burst   # 0.1ms 内连发两包（会丢掉后一包）
- *   ./test_dual_arm_100hz_follow both-thread  # 两线程各 50 Hz、错开 10ms
- *   ./test_dual_arm_100hz_follow all          # Group::ALL 一包同时发，对照
+ *   ./test_dual_arm_100hz_follow both --left 20 --right 30
+ *   ./test_dual_arm_100hz_follow all --left 10,20,30,40,50,60,70 --right 20
+ *
+ * 目标偏移（可选，单位 deg，相对 stage 起始姿态）：
+ *   --left  <deg>              左臂各轴相同偏移
+ *   --left  <d1,d2,...,dN>     左臂逐轴偏移（N = 关节数，通常 7）
+ *   --right <deg> | <d1,...>   右臂同上
+ *   未指定时：left 模式默认 J1..J7 为 +10..70；其余模式默认各轴 +20。
  */
 
 #include "control_api.h"
@@ -29,6 +32,7 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -52,6 +56,9 @@ constexpr int kPeriodMs = 1000 / kControlHz;
 constexpr float kDurationSeconds = 8.0F;
 constexpr float kLeftAmplitudeDeg = 20.0F;
 constexpr float kRightAmplitudeDeg = 20.0F;
+// left-only mode: per-joint ramp targets (J1..J7) in deg.
+constexpr std::array<float, 7> kLeftPerJointAmplitudeDeg = {
+    10.0F, 20.0F, 30.0F, 40.0F, 50.0F, 60.0F, 70.0F};
 constexpr float kMaxSpeedDegS = 30.0F;
 constexpr float kGuardVelocityDegS = 35.0F;
 constexpr float kReachFraction = 0.90F;
@@ -88,6 +95,7 @@ struct ArmContext {
     Group group = Group::LEFT_ARM;
     const char* name = "LEFT";
     float amplitude_deg = 0.0F;
+    std::vector<float> amplitude_deg_per_joint;
     std::vector<float> start;
     std::vector<float> cmd;
     std::vector<float> pos;
@@ -95,8 +103,179 @@ struct ArmContext {
     ArmStats stats;
 };
 
-const char* mode_help() {
-    return "mode: left | right | both | both-burst | both-thread | all | (default: interactive)";
+struct TargetOverrides {
+    std::optional<std::vector<float>> left_deg;
+    std::optional<std::vector<float>> right_deg;
+};
+
+struct ParsedArgs {
+    std::string mode;
+    TargetOverrides targets;
+    bool show_help = false;
+};
+
+std::vector<float> default_left_offsets_deg(const std::string& stage) {
+    if (stage == "left") {
+        return {kLeftPerJointAmplitudeDeg.begin(), kLeftPerJointAmplitudeDeg.end()};
+    }
+    return {kLeftAmplitudeDeg};
+}
+
+std::vector<float> default_right_offsets_deg(const std::string& /*stage*/) {
+    return {kRightAmplitudeDeg};
+}
+
+void print_usage(const char* prog) {
+    std::cout << "Usage: " << prog << " [mode] [--left <spec>] [--right <spec>]\n"
+              << "  mode: left | right | both | both-burst | both-thread | all\n"
+              << "        (default: interactive left -> right -> both)\n"
+              << "  --left, --right: offset in deg from stage start pose.\n"
+              << "        One number  -> same offset on every joint.\n"
+              << "        Comma list  -> per-joint offsets (count must match arm).\n"
+              << "  Defaults when omitted:\n"
+              << "        left mode:  L +[10,20,30,40,50,60,70] deg\n"
+              << "        other modes: L/R +20 deg/joint\n"
+              << "  Examples:\n"
+              << "    " << prog << " left --left 15\n"
+              << "    " << prog << " both --left 20 --right 30\n"
+              << "    " << prog << " all --left 10,20,30,40,50,60,70 --right 20\n";
+}
+
+bool parse_offset_spec(const std::string& text, std::vector<float>& out,
+                       std::string& err) {
+    out.clear();
+    std::string token;
+    for (char ch : text) {
+        if (ch == ',') {
+            if (token.empty()) {
+                err = "empty value in offset list '" + text + "'";
+                return false;
+            }
+            try {
+                out.push_back(std::stof(token));
+            } catch (const std::exception&) {
+                err = "invalid number '" + token + "' in '" + text + "'";
+                return false;
+            }
+            token.clear();
+        } else if (ch != ' ') {
+            token.push_back(ch);
+        }
+    }
+    if (token.empty()) {
+        err = "empty offset spec";
+        return false;
+    }
+    try {
+        out.push_back(std::stof(token));
+    } catch (const std::exception&) {
+        err = "invalid number '" + token + "' in '" + text + "'";
+        return false;
+    }
+    return true;
+}
+
+bool parse_args(int argc, char** argv, ParsedArgs& out, std::string& err) {
+    out = ParsedArgs{};
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            out.show_help = true;
+            return true;
+        }
+        if (arg == "--left" || arg == "-l") {
+            if (i + 1 >= argc) {
+                err = arg + " requires a value";
+                return false;
+            }
+            std::vector<float> values;
+            if (!parse_offset_spec(argv[++i], values, err)) return false;
+            out.targets.left_deg = std::move(values);
+            continue;
+        }
+        if (arg == "--right" || arg == "-r") {
+            if (i + 1 >= argc) {
+                err = arg + " requires a value";
+                return false;
+            }
+            std::vector<float> values;
+            if (!parse_offset_spec(argv[++i], values, err)) return false;
+            out.targets.right_deg = std::move(values);
+            continue;
+        }
+        if (!arg.empty() && arg[0] == '-') {
+            err = "unknown option '" + arg + "'";
+            return false;
+        }
+        if (!out.mode.empty()) {
+            err = "unexpected argument '" + arg + "'";
+            return false;
+        }
+        out.mode = arg;
+    }
+    return true;
+}
+
+bool resolve_offsets(const std::optional<std::vector<float>>& user,
+                     const std::vector<float>& stage_default,
+                     std::size_t joint_count, std::vector<float>& out,
+                     std::string& err, const char* arm_label) {
+    const std::vector<float>& src =
+        user ? *user : stage_default;
+    if (src.empty()) {
+        err = std::string(arm_label) + " offset list is empty";
+        return false;
+    }
+    if (src.size() == 1) {
+        out.assign(joint_count, src.front());
+        return true;
+    }
+    if (src.size() != joint_count) {
+        err = std::string(arm_label) + " offset count must be 1 or " +
+              std::to_string(joint_count) + ", got " + std::to_string(src.size());
+        return false;
+    }
+    out = src;
+    return true;
+}
+
+void apply_offsets_to_arm(ArmContext& arm, const std::vector<float>& offsets_deg) {
+    const bool uniform = std::all_of(
+        offsets_deg.begin(), offsets_deg.end(),
+        [&](float v) { return std::abs(v - offsets_deg.front()) < 1e-4F; });
+    if (uniform) {
+        arm.amplitude_deg = offsets_deg.front();
+        arm.amplitude_deg_per_joint.clear();
+    } else {
+        arm.amplitude_deg_per_joint = offsets_deg;
+        arm.amplitude_deg =
+            *std::max_element(offsets_deg.begin(), offsets_deg.end());
+    }
+}
+
+std::string format_deg_list(const std::vector<float>& values) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        oss << values[i];
+        if (i + 1 < values.size()) oss << ", ";
+    }
+    oss << "]";
+    return oss.str();
+}
+
+std::string format_offset_desc(const std::vector<float>& offsets_deg) {
+    if (offsets_deg.empty()) return "no offset";
+    const bool uniform = std::all_of(
+        offsets_deg.begin(), offsets_deg.end(),
+        [&](float v) { return std::abs(v - offsets_deg.front()) < 1e-4F; });
+    if (uniform) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(0) << "+" << offsets_deg.front()
+            << " deg/joint";
+        return oss.str();
+    }
+    return "+deg " + format_deg_list(offsets_deg);
 }
 
 std::vector<float> offset_target(const std::vector<float>& start, float amplitude_deg,
@@ -104,6 +283,16 @@ std::vector<float> offset_target(const std::vector<float>& start, float amplitud
     std::vector<float> out = start;
     const float delta = amplitude_deg * kDegToRad * scale;
     for (float& joint : out) joint += delta;
+    return out;
+}
+
+std::vector<float> offset_target_per_joint(const std::vector<float>& start,
+                                           const std::vector<float>& amplitude_deg,
+                                           float scale) {
+    std::vector<float> out = start;
+    const std::size_t n = std::min(out.size(), amplitude_deg.size());
+    for (std::size_t i = 0; i < n; ++i)
+        out[i] += amplitude_deg[i] * kDegToRad * scale;
     return out;
 }
 
@@ -117,14 +306,47 @@ void print_pose(const char* label, const std::vector<float>& joints) {
     std::cout << "]\n";
 }
 
-std::string format_deg_list(const std::vector<float>& values) {
+std::string format_arm_target_label(const ArmContext& arm) {
+    if (!arm.amplitude_deg_per_joint.empty())
+        return "target +deg " + format_deg_list(arm.amplitude_deg_per_joint);
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(1) << "[";
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        oss << values[i];
-        if (i + 1 < values.size()) oss << ", ";
+    oss << std::fixed << std::setprecision(0)
+        << "target +" << arm.amplitude_deg << " deg/joint";
+    return oss.str();
+}
+
+std::string describe_stage_motion(const std::string& name, bool use_left,
+                                  bool use_right,
+                                  const std::vector<float>& left_offsets,
+                                  const std::vector<float>& right_offsets) {
+    std::ostringstream oss;
+    oss << "8 s high-follow: ";
+    if (name == "left") {
+        oss << "@100 Hz left " << format_offset_desc(left_offsets)
+            << "; right/head held.";
+    } else if (name == "right") {
+        oss << "@100 Hz right " << format_offset_desc(right_offsets)
+            << "; left/head held.";
+    } else if (name == "both") {
+        oss << "staggered move_joint (left, 10 ms gap, right); L "
+            << format_offset_desc(left_offsets) << ", R "
+            << format_offset_desc(right_offsets) << " (~50 Hz/arm).";
+    } else if (name == "both-burst") {
+        oss << "burst left then right in one cycle; second UDP packet usually "
+               "dropped (first arm tracks); L "
+            << format_offset_desc(left_offsets) << ", R "
+            << format_offset_desc(right_offsets) << ".";
+    } else if (name == "both-thread") {
+        oss << "dual-thread 50 Hz each; L " << format_offset_desc(left_offsets)
+            << ", R " << format_offset_desc(right_offsets) << ".";
+    } else if (name == "all") {
+        oss << "@100 Hz Group::ALL; L " << format_offset_desc(left_offsets)
+            << ", R " << format_offset_desc(right_offsets) << " in one packet.";
+    } else {
+        if (use_left) oss << "L " << format_offset_desc(left_offsets);
+        if (use_left && use_right) oss << "; ";
+        if (use_right) oss << "R " << format_offset_desc(right_offsets);
     }
-    oss << "]";
     return oss.str();
 }
 
@@ -227,8 +449,7 @@ void print_live_line(const char* stage, float elapsed, double cycle_ms,
         << "[" << stage << "] t=" << elapsed << "s cycle=" << cycle_ms << "ms";
     auto append = [&](const ArmContext* arm) {
         if (!arm) return;
-        oss << "\n  " << arm->name
-            << " +" << std::setprecision(0) << arm->amplitude_deg << "deg"
+        oss << "\n  " << arm->name << " " << format_arm_target_label(*arm)
             << std::setprecision(2)
             << "  progress=" << (100.0F * progress_ratio(*arm)) << "%"
             << "  cmd=" << arm->stats.last.cmd_offset_deg
@@ -256,9 +477,9 @@ void print_summary(const char* stage, const ArmContext* left,
             s.cycles > 0 ? static_cast<float>(s.sum_cycle_ms / s.cycles) : 0.0F;
         const float final_progress = 100.0F * progress_ratio(*arm);
         std::cout << std::fixed << std::setprecision(2)
-                  << "  " << arm->name << " target=+" << arm->amplitude_deg
-                  << " deg/joint"
-                  << "  final_progress=" << final_progress << "%\n"
+                  << "  " << arm->name << " " << format_arm_target_label(*arm)
+                  << "  final_progress=" << final_progress << "%"
+                  << "  (mean act / max target; per-joint mode is approximate)\n"
                   << "       mean|lag|=" << mean_lag << " deg"
                   << "  max|lag|=" << s.max_abs_lag << " deg"
                   << "  mean|vel|=" << mean_vel << " deg/s"
@@ -362,20 +583,22 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
                bool use_left, bool use_right,
                const std::vector<float>& left_start,
                const std::vector<float>& right_start,
-               const std::vector<float>& head_now) {
+               const std::vector<float>& head_now,
+               const std::vector<float>& left_offsets_deg,
+               const std::vector<float>& right_offsets_deg) {
     ArmContext left;
     left.group = Group::LEFT_ARM;
     left.name = "L";
-    left.amplitude_deg = kLeftAmplitudeDeg;
     left.start = left_start;
     left.cmd = left_start;
+    if (use_left) apply_offsets_to_arm(left, left_offsets_deg);
 
     ArmContext right;
     right.group = Group::RIGHT_ARM;
     right.name = "R";
-    right.amplitude_deg = kRightAmplitudeDeg;
     right.start = right_start;
     right.cmd = right_start;
+    if (use_right) apply_offsets_to_arm(right, right_offsets_deg);
 
     std::atomic<bool> stop{false};
     std::atomic<bool> safety{false};
@@ -384,7 +607,12 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
 
     auto fill_cmd = [](ArmContext& arm, float progress) {
         const float smooth = 0.5F - 0.5F * std::cos(kPi * progress);
-        arm.cmd = offset_target(arm.start, arm.amplitude_deg, smooth);
+        if (!arm.amplitude_deg_per_joint.empty()) {
+            arm.cmd = offset_target_per_joint(arm.start, arm.amplitude_deg_per_joint,
+                                              smooth);
+        } else {
+            arm.cmd = offset_target(arm.start, arm.amplitude_deg, smooth);
+        }
     };
 
     auto tick_one = [&](ArmContext& arm, float elapsed, float progress) {
@@ -398,11 +626,18 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
         update_stats(arm, elapsed);
     };
 
-    std::cout << "\n==> " << stage
-              << "  " << kDurationSeconds << " s,"
-              << " L all joints +" << kLeftAmplitudeDeg << " deg,"
-              << " R all joints +" << kRightAmplitudeDeg << " deg,"
-              << " follow=true mode=" << static_cast<int>(kTrajectoryMode)
+    std::cout << "\n==> " << stage << "  " << kDurationSeconds << " s,";
+    if (use_left) {
+        std::cout << " L " << format_offset_desc(left_offsets_deg) << ',';
+    } else {
+        std::cout << " L held,";
+    }
+    if (use_right) {
+        std::cout << " R " << format_offset_desc(right_offsets_deg) << ',';
+    } else {
+        std::cout << " R held,";
+    }
+    std::cout << " follow=true mode=" << static_cast<int>(kTrajectoryMode)
               << " radio=" << kRadio << '\n';
     if (mode == DriveMode::Sequential && use_left && use_right) {
         std::cout << "  Write pattern: left, wait 10ms, right, wait 10ms.\n"
@@ -643,9 +878,19 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
 }  // namespace
 
 int main(int argc, char** argv) {
-    const std::string requested = (argc >= 2) ? argv[1] : std::string();
-    const bool interactive = requested.empty();
+    ParsedArgs args;
+    std::string parse_err;
+    if (!parse_args(argc, argv, args, parse_err)) {
+        std::cerr << parse_err << '\n';
+        print_usage(argv[0]);
+        return 1;
+    }
+    if (args.show_help) {
+        print_usage(argv[0]);
+        return 0;
+    }
 
+    const bool interactive = args.mode.empty();
     std::array<std::string, 5> stages{};
     int stage_count = 0;
     auto add = [&](const std::string& name) {
@@ -657,13 +902,13 @@ int main(int argc, char** argv) {
         add("left");
         add("right");
         add("both");
-    } else if (requested == "left" || requested == "right" ||
-               requested == "both" || requested == "both-burst" ||
-               requested == "both-thread" || requested == "all") {
-        add(requested);
+    } else if (args.mode == "left" || args.mode == "right" ||
+               args.mode == "both" || args.mode == "both-burst" ||
+               args.mode == "both-thread" || args.mode == "all") {
+        add(args.mode);
     } else {
-        std::cerr << "Unknown argument '" << requested << "'\n"
-                  << mode_help() << '\n';
+        std::cerr << "Unknown mode '" << args.mode << "'\n";
+        print_usage(argv[0]);
         return 1;
     }
 
@@ -685,6 +930,15 @@ int main(int argc, char** argv) {
         print_pose("LEFT ", left_now);
         print_pose("RIGHT", right_now);
 
+        if (args.targets.left_deg) {
+            std::cout << "Left target override: "
+                      << format_offset_desc(*args.targets.left_deg) << '\n';
+        }
+        if (args.targets.right_deg) {
+            std::cout << "Right target override: "
+                      << format_offset_desc(*args.targets.right_deg) << '\n';
+        }
+
         if (!enable_arm(api, Group::LEFT_ARM, true) ||
             !enable_arm(api, Group::RIGHT_ARM, true))
             return 1;
@@ -693,7 +947,8 @@ int main(int argc, char** argv) {
             return 1;
 
         if (!wait_for_enter(
-                "First go home (both arms to 0) so the identical +20 deg move is easy to see."))
+                "First go home (both arms to 0) for a known start pose before the "
+                "high-follow test."))
             return 0;
         if (!go_home_both(api, left_now, right_now, head_now)) return 1;
 
@@ -731,10 +986,30 @@ int main(int argc, char** argv) {
                 label = "BOTH via Group::ALL (control)";
             }
 
+            std::vector<float> left_offsets;
+            std::vector<float> right_offsets;
+            if (use_left &&
+                !resolve_offsets(args.targets.left_deg,
+                                 default_left_offsets_deg(name), left_now.size(),
+                                 left_offsets, parse_err, "left")) {
+                std::cerr << parse_err << '\n';
+                return 1;
+            }
+            if (use_right &&
+                !resolve_offsets(args.targets.right_deg,
+                                 default_right_offsets_deg(name),
+                                 right_now.size(), right_offsets, parse_err,
+                                 "right")) {
+                std::cerr << parse_err << '\n';
+                return 1;
+            }
+
             std::ostringstream prompt;
             prompt << "Stage " << (i + 1) << "/" << stage_count << ": " << label
-                   << "\nIdentical command: every joint +" << kLeftAmplitudeDeg
-                   << " deg on both arms, then both go home together.";
+                   << '\n'
+                   << describe_stage_motion(name, use_left, use_right,
+                                            left_offsets, right_offsets)
+                   << "\nThen hold 2 s and both arms go home together.";
             if (!wait_for_enter(prompt.str().c_str())) return 0;
 
             if (!wait_for_joint_state(api, Group::LEFT_ARM, left_now) ||
@@ -745,15 +1020,19 @@ int main(int argc, char** argv) {
             }
 
             if (!run_stage(api, label, mode, use_left, use_right, left_now,
-                           right_now, head_now))
+                           right_now, head_now, left_offsets, right_offsets))
                 return 1;
         }
 
-        std::cout << "\nDone. Watch live `progress` / per-joint `d=`.\n"
-                     "Staggered BOTH: right should track +20, left is repeatedly "
-                     "held at current pose by the right packet (slower).\n"
-                     "Burst BOTH: only the first arm moves (second UDP packet dropped).\n"
-                  << "Same-speed control: ./test_dual_arm_100hz_follow all\n";
+        std::cout << "\nDone. Watch live `progress` / per-joint `d=` during each stage.\n"
+                     "Use --left / --right to override per-arm offset targets (deg).\n"
+                     "Mode reference:\n"
+                     "  left        : left arm only; default L +[10..70] deg.\n"
+                     "  right       : right arm only; default R +20 deg/joint.\n"
+                     "  both        : staggered packets; left slows (hold overwrite).\n"
+                     "  both-burst  : second packet often dropped; first arm tracks.\n"
+                     "  both-thread : two threads @50 Hz each, right delayed 10 ms.\n"
+                     "  all         : both arms sync via Group::ALL @100 Hz.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Fatal SDK error: " << error.what() << '\n';
