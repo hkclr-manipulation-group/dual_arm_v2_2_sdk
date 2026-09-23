@@ -4,7 +4,7 @@
  *
  * 对齐 ros2_control JointGroupBase 的调用方式：
  *   read : get_joint / get_joint_velocity / get_group_state
- *   write: move_joint(group, cmd, follow=true, trajectory_mode=2, radio=999)
+ *   write: move_joint(...) 或 set_joint_target(...) + flush_joint_command(...)
  *
  * 轨迹：从当前姿态平滑偏移到目标（相对起始角 +deg）；到位后双臂同时回零。
  *
@@ -13,6 +13,7 @@
  *   ./test_dual_arm_100hz_follow left
  *   ./test_dual_arm_100hz_follow both --left 20 --right 30
  *   ./test_dual_arm_100hz_follow all --left 10,20,30,40,50,60,70 --right 20
+ *   ./test_dual_arm_100hz_follow both-flush   # set_joint_target + flush @100 Hz
  *
  * 目标偏移（可选，单位 deg，相对 stage 起始姿态）：
  *   --left  <deg>              左臂各轴相同偏移
@@ -127,7 +128,7 @@ std::vector<float> default_right_offsets_deg(const std::string& /*stage*/) {
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [mode] [--left <spec>] [--right <spec>]\n"
-              << "  mode: left | right | both | both-burst | both-thread | all\n"
+              << "  mode: left | right | both | both-burst | both-thread | both-flush | all\n"
               << "        (default: interactive left -> right -> both)\n"
               << "  --left, --right: offset in deg from stage start pose.\n"
               << "        One number  -> same offset on every joint.\n"
@@ -138,7 +139,8 @@ void print_usage(const char* prog) {
               << "  Examples:\n"
               << "    " << prog << " left --left 15\n"
               << "    " << prog << " both --left 20 --right 30\n"
-              << "    " << prog << " all --left 10,20,30,40,50,60,70 --right 20\n";
+              << "    " << prog << " all --left 10,20,30,40,50,60,70 --right 20\n"
+              << "    " << prog << " both-flush --left 20 --right 20\n";
 }
 
 bool parse_offset_spec(const std::string& text, std::vector<float>& out,
@@ -339,6 +341,10 @@ std::string describe_stage_motion(const std::string& name, bool use_left,
     } else if (name == "both-thread") {
         oss << "dual-thread 50 Hz each; L " << format_offset_desc(left_offsets)
             << ", R " << format_offset_desc(right_offsets) << ".";
+    } else if (name == "both-flush") {
+        oss << "@100 Hz set_joint_target + flush_joint_command; L "
+            << format_offset_desc(left_offsets) << ", R "
+            << format_offset_desc(right_offsets) << ".";
     } else if (name == "all") {
         oss << "@100 Hz Group::ALL; L " << format_offset_desc(left_offsets)
             << ", R " << format_offset_desc(right_offsets) << " in one packet.";
@@ -388,6 +394,30 @@ void write_arm(ControlApi& api, ArmContext& arm) {
     const RetCode ret = api.move_joint(arm.group, arm.cmd, true, kTrajectoryMode,
                                        kRadio);
     if (ret != RetCode::SUCCESS) ++arm.stats.write_fail;
+}
+
+bool flush_coalesced_targets(ControlApi& api, const ArmContext& left,
+                               const ArmContext& right, ArmStats& left_stats,
+                               ArmStats& right_stats) {
+    RetCode ret = api.set_joint_target(Group::LEFT_ARM, left.cmd);
+    if (ret != RetCode::SUCCESS) {
+        ++left_stats.write_fail;
+        ++right_stats.write_fail;
+        return false;
+    }
+    ret = api.set_joint_target(Group::RIGHT_ARM, right.cmd);
+    if (ret != RetCode::SUCCESS) {
+        ++left_stats.write_fail;
+        ++right_stats.write_fail;
+        return false;
+    }
+    ret = api.flush_joint_command(true, kTrajectoryMode, kRadio);
+    if (ret != RetCode::SUCCESS) {
+        ++left_stats.write_fail;
+        ++right_stats.write_fail;
+        return false;
+    }
+    return true;
 }
 
 void update_stats(ArmContext& arm, float elapsed) {
@@ -577,7 +607,13 @@ bool hold_current(ControlApi& api, bool use_left, bool use_right) {
     return true;
 }
 
-enum class DriveMode { Sequential, SequentialBurst, Threaded, GroupAll };
+enum class DriveMode {
+    Sequential,
+    SequentialBurst,
+    Threaded,
+    CoalescedFlush,
+    GroupAll
+};
 
 bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
                bool use_left, bool use_right,
@@ -651,10 +687,16 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
                      "the first arm moves.\n";
     } else if (mode == DriveMode::Threaded) {
         std::cout << "  Two threads, 50 Hz each, right delayed by 10ms.\n";
+    } else if (mode == DriveMode::CoalescedFlush) {
+        std::cout << "  Each 10 ms: set_joint_target(L), set_joint_target(R), "
+                     "flush_joint_command().\n"
+                     "  Unselected groups (head) held from feedback at flush.\n";
     } else if (mode == DriveMode::GroupAll) {
         std::cout << "  One move_joint(ALL) per 10ms; both arm targets in the "
                      "same packet.\n";
     }
+
+    if (mode == DriveMode::CoalescedFlush) api.reset_joint_target_cache();
 
     const auto start_time = std::chrono::steady_clock::now();
     auto next_wakeup = start_time;
@@ -714,7 +756,33 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
             const float progress = std::min(elapsed / kDurationSeconds, 1.0F);
             const auto cycle_begin = std::chrono::steady_clock::now();
 
-            if (mode == DriveMode::GroupAll && use_left && use_right) {
+            if (mode == DriveMode::CoalescedFlush && use_left && use_right) {
+                read_arm(api, left);
+                read_arm(api, right);
+                if (over_velocity(left) || over_velocity(right)) {
+                    safety.store(true);
+                    break;
+                }
+                fill_cmd(left, progress);
+                fill_cmd(right, progress);
+                flush_coalesced_targets(api, left, right, left.stats, right.stats);
+                update_stats(left, elapsed);
+                update_stats(right, elapsed);
+                const double cycle_ms =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - cycle_begin)
+                        .count();
+                left.stats.sum_cycle_ms += cycle_ms;
+                right.stats.sum_cycle_ms += cycle_ms;
+                ++left.stats.cycles;
+                ++right.stats.cycles;
+                if (++debug_tick >= kDebugEveryN) {
+                    debug_tick = 0;
+                    print_live_line(stage, elapsed, cycle_ms, &left, &right);
+                }
+                next_wakeup += std::chrono::milliseconds(kPeriodMs);
+                std::this_thread::sleep_until(next_wakeup);
+            } else if (mode == DriveMode::GroupAll && use_left && use_right) {
                 read_arm(api, left);
                 read_arm(api, right);
                 if (over_velocity(left) || over_velocity(right)) {
@@ -904,7 +972,8 @@ int main(int argc, char** argv) {
         add("both");
     } else if (args.mode == "left" || args.mode == "right" ||
                args.mode == "both" || args.mode == "both-burst" ||
-               args.mode == "both-thread" || args.mode == "all") {
+               args.mode == "both-thread" || args.mode == "both-flush" ||
+               args.mode == "all") {
         add(args.mode);
     } else {
         std::cerr << "Unknown mode '" << args.mode << "'\n";
@@ -979,6 +1048,11 @@ int main(int argc, char** argv) {
                 use_right = true;
                 mode = DriveMode::Threaded;
                 label = "BOTH threaded (50 Hz each, right delayed 10ms)";
+            } else if (name == "both-flush") {
+                use_left = true;
+                use_right = true;
+                mode = DriveMode::CoalescedFlush;
+                label = "BOTH coalesced (set_joint_target + flush @100 Hz)";
             } else if (name == "all") {
                 use_left = true;
                 use_right = true;
@@ -1032,6 +1106,7 @@ int main(int argc, char** argv) {
                      "  both        : staggered packets; left slows (hold overwrite).\n"
                      "  both-burst  : second packet often dropped; first arm tracks.\n"
                      "  both-thread : two threads @50 Hz each, right delayed 10 ms.\n"
+                     "  both-flush  : set_joint_target + flush @100 Hz (SDK coalesce).\n"
                      "  all         : both arms sync via Group::ALL @100 Hz.\n";
         return 0;
     } catch (const std::exception& error) {
