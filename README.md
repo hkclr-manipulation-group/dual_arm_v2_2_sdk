@@ -1,10 +1,13 @@
 # Dual Arm V2.2 控制 SDK
 
-本仓库提供 **Dual Arm V2.2 的 C++ 客户端控制 API**。SDK 通过 UDP 与实时控制服务 `rt_control` 通信，向机器人下发运动与夹爪指令，并接收关节/夹爪状态反馈。
+本仓库提供 **Dual Arm V2.2 的 C++ 与 C 客户端控制 API**。SDK 通过 UDP 与实时控制服务 `rt_control` 通信，向机器人下发运动与夹爪指令，并接收关节/夹爪状态反馈。
 
 > **重要说明**：本仓库包含客户端 SDK、示例程序与 **`dual_v2_2` 运行时配置**（`cuarm_configuration/`）。实际驱动机器人还需要 **`cuarm_rt_control`**（生成 `dual_v2_2_rt_control` 可执行文件）。编译 SDK 依赖本仓库内的 **`robot_platform_utils`** 与 **`curi_udp`** 子模块。
 
-接口定义见 [`cpp/include/control_api.h`](cpp/include/control_api.h)。
+接口定义见：
+
+- C++：[`cpp/include/control_api.h`](cpp/include/control_api.h)
+- C：[`c/include/dual_arm_control_api.h`](c/include/dual_arm_control_api.h)（ABI 包装层，内部链接 C++ SDK）
 
 ---
 
@@ -12,7 +15,7 @@
 
 | 组件 | 是否包含在本仓库 | 作用 |
 | --- | --- | --- |
-| `dual_arm_v2_2_sdk`（本仓库） | ✅ | C++ 控制 API、示例程序、`cuarm_configuration/dual_v2_2` 配置 |
+| `dual_arm_v2_2_sdk`（本仓库） | ✅ | C++/C 控制 API、示例、`cuarm_configuration/dual_v2_2` 配置 |
 | `cuarm_rt_control` | ❌ 需另行获取 | 实时控制服务（`dual_v2_2_rt_control`） |
 | `robot_platform_utils` | ✅ 子模块 | 配置加载、UDP 消息协议（编译依赖） |
 | `curi_udp` | ✅ 子模块 | UDP 通信库（编译依赖） |
@@ -77,20 +80,26 @@ sudo apt-get install libyaml-cpp-dev
 
 ```text
 dual_arm_v2_2_sdk/
-├── CMakeLists.txt              # 构建入口（SDK + 示例）
-├── cpp/                        # SDK 库源码与头文件
+├── CMakeLists.txt              # 构建入口（C++/C SDK + 示例）
+├── cpp/                        # C++ SDK
 │   ├── include/
 │   └── src/
-├── examples/                   # 示例程序
-├── cuarm_configuration/        # 运行时配置
+├── c/                          # C API 包装层
+│   ├── include/
+│   └── src/
+├── examples/
+│   ├── cpp/                    # C++ 示例 → build/bin/cpp/
+│   ├── c/                      # C 示例 → build/bin/c/
+│   └── data/                   # 示教数据
+├── cuarm_configuration/
 │   └── dual_v2_2/
-│       └── config.yaml
-├── robot_platform_utils/       # 子模块（编译依赖）
-├── curi_udp/                   # 子模块（编译依赖）
+├── robot_platform_utils/
+├── curi_udp/
 ├── doc/
-└── build/                      # 构建产物（out-of-source）
-    ├── bin/                    # 示例可执行文件
-    └── lib/                    # libdual_arm_v2_2_control_sdk.so
+└── build/
+    ├── bin/cpp/
+    ├── bin/c/
+    └── lib/                    # libdual_arm_v2_2_control_sdk.so + _c.so
 ```
 
 `rt_control` 仍须单独获取并编译，例如与 SDK 放在同一工作区：
@@ -142,23 +151,19 @@ cd dual_arm_v2_2_sdk
 cmake -S . -B build
 cmake --build build -j
 
-# 在 build/ 或 build/bin/ 下运行均可
 cd build
-./bin/test_control_api    # 推荐第一步：验证通信
-./bin/go_home             # 双臂回零
-./bin/move_arms_demo      # 单臂/双臂运动演示
-
-# 等价写法
-cd build/bin
-./test_control_api
-./go_home
-./move_arms_demo
+export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
+./bin/cpp/test_control_api    # C++ 冒烟测试
+./bin/cpp/go_home
+./bin/c/go_home               # C 版同等示例
+./bin/c/test_gripper_api
 ```
 
 构建说明：
 
 - **禁止源码内构建**：请勿在仓库根目录直接 `cmake .`；始终使用 `-S . -B build`。
-- **关闭示例**（仅编译 SDK 库）：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_EXAMPLES=OFF`
+- **关闭 C++ 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES=OFF`
+- **关闭 C 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF`
 - **默认安装前缀**：`build/install`（`cmake --install build`）
 
 示例程序通过 [`examples/example_common.h`](examples/example_common.h) 中的 `default_config_path()` **按可执行文件位置**自动查找 `cuarm_configuration/dual_v2_2`，因此从 `build/` 或 `build/bin/` 启动都能找到配置。自定义布局时，可修改该函数，或在集成时向 `ControlApi` 传入绝对路径。

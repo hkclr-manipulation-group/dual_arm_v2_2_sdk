@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(dual_arm_v2_2_control_sdk)
+
+include("${CMAKE_CURRENT_LIST_DIR}/dual_arm_v2_2_control_sdk_cTargets.cmake")
+
+if(NOT TARGET dual_arm_v2_2_control_sdk_c::dual_arm_v2_2_control_sdk_c)
+    message(FATAL_ERROR
+        "dual_arm_v2_2_control_sdk_cTargets.cmake did not define "
+        "dual_arm_v2_2_control_sdk_c::dual_arm_v2_2_control_sdk_c")
+endif()
+
+check_required_components(dual_arm_v2_2_control_sdk_c)

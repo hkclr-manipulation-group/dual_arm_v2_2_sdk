@@ -33,8 +33,8 @@ inline std::string default_config_path() {
     }
     const fs::path exe_dir = executable_directory();
     const std::vector<fs::path> candidates = {
+        exe_dir / ".." / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
         exe_dir / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
-        exe_dir / ".." / "cuarm_configuration" / "dual_v2_2",
     };
     for (const auto& dir : candidates) {
         std::error_code ec;
@@ -61,8 +61,10 @@ inline std::string default_teach_file_path() {
     namespace fs = std::filesystem;
     const fs::path exe_dir = executable_directory();
     const std::vector<fs::path> candidates = {
-        exe_dir / ".." / ".." / "examples" / "teach_points_left_right.txt",
-        exe_dir / ".." / "examples" / "teach_points_left_right.txt",
+        exe_dir / ".." / ".." / ".." / "examples" / "data" /
+            "teach_points.txt",
+        exe_dir / ".." / ".." / "examples" / "data" /
+            "teach_points.txt",
     };
     for (const auto& file : candidates) {
         std::error_code ec;

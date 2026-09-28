@@ -9,8 +9,8 @@ hardware:
   motor_id: 8
   can_device_index: 0
   can_channel: 0
-  open_position_deg: -77.62
-  close_position_deg: 5.28
+  open_position_deg: -61.31
+  close_position_deg: -0.67
 safety:
   joint_soft_limit:
     position: [[0], [1]]

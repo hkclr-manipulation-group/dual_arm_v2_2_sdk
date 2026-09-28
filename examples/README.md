@@ -1,6 +1,16 @@
 # SDK 示例程序
 
-可执行文件位于 **`build/bin/`**，在 **`build/`** 或 **`build/bin/`** 下运行均可（如 `./bin/go_home` 或 `./go_home`）。共享工具见 [`example_common.h`](example_common.h)（`default_config_path()`、等待 rt_control、RetCode 名称等）。
+C++ 与 C 示例分别位于 **`examples/cpp/`** 与 **`examples/c/`**，示教数据在 **`examples/data/`**。
+
+可执行文件输出到：
+
+- C++：`build/bin/cpp/`（如 `./bin/cpp/go_home`）
+- C：`build/bin/c/`（如 `./bin/c/go_home`）
+
+共享工具：
+
+- C++：[`examples/cpp/example_common.h`](cpp/example_common.h)
+- C：[`examples/c/example_common.h`](c/example_common.h)、[`example_velocity_guard.h`](c/example_velocity_guard.h)
 
 ## 前置条件
 
@@ -10,99 +20,64 @@
 ```bash
 cmake -S . -B build
 cmake --build build -j
-cd build    # 或 cd build/bin
+cd build
+export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
 ```
 
-3. **无需启动 panel** — SDK 通过 UDP 直接向 `rt_control` 发送指令
+3. **无需启动 panel**
 
----
-
-## 快速上手（推荐顺序）
-
-| 顺序 | 程序 | 说明 |
-| --- | --- | --- |
-| 1 | `./test_control_api` | 交互式冒烟测试，验证通信与基本 API |
-| 2 | `./go_home` | 双臂回零（最简单运动示例） |
-| 3 | `./move_arms_demo` | 单臂 / 双臂运动，含到位检测与误差报告 |
-
----
-
-## 入门示例
-
-### `go_home`
-
-双臂 7 关节置 0，头部保持当前角度。
+关闭示例：
 
 ```bash
-./go_home
-```
-
-### `move_arms_demo`
-
-演示左臂 → 右臂 → 双臂 → 回零。在源码顶部修改 `kLeftOffsetDeg` / `kRightOffsetDeg`（相对当前位姿偏移，单位：度）。
-
-```bash
-./move_arms_demo
+cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES=OFF
+cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF
 ```
 
 ---
 
-## 应用示例
+## 示例一览
 
-### `teach_replay`
+| 程序 | C++ | C | 说明 |
+| --- | --- | --- | --- |
+| 回零 | `./bin/cpp/go_home` | `./bin/c/go_home` | 双臂回零 |
+| 运动演示 | `move_arms_demo` | 同左 | 单臂/双臂运动 |
+| 示教回放 | `teach_replay` | 同左 | 循环回放示教文件 |
+| 冒烟测试 | `test_control_api` | 同左 | 交互式 API 测试 |
+| 夹爪 | `test_gripper_api` | 同左 | 左夹爪 API |
+| 100Hz 跟随 | `test_dual_arm_100hz_follow` | 同左 | 高跟随模式对比 |
 
-循环回放示教文件中的关节轨迹，Ctrl+C 停止。
-
-```bash
-./teach_replay
-./teach_replay ../../examples/teach_points_left_right.txt
-```
-
-**示教数据文件**
-
-| 文件 | 说明 |
-| --- | --- |
-| `teach_points.txt` | 默认 17 列（含夹爪列） |
-| `teach_points_left_right.txt` | 15 列（无夹爪） |
-| `teach_points_right.txt` | 仅右臂数据 |
-
-格式（逗号分隔，度）：`idx, left_j1..j7, [left_gripper,] right_j1..j7, [right_gripper]`
+完整列表见根目录 `CMakeLists.txt` 中的 `_dual_arm_cpp_examples`。
 
 ---
 
-## 测试 / 高级示例
+## 示教文件
 
-| 程序 | 用途 | 额外要求 |
-| --- | --- | --- |
-| `test_control_api` | 组控制、关节读写、低/高跟随、速度限位 | — |
-| `test_control_api_various_command_frequency` | 高跟随不同发送频率对比 | — |
-| `test_move_joint_curve_fit` | `trajectory_mode=1` 曲线拟合 | — |
-| `test_gripper_api` | 单夹爪 API | `config.yaml` 需配置 `robot.gripper` |
-| `test_dual_gripper_api` | 双臂夹爪 API | 同上 |
-| `test_arm_gripper_safe` | 夹爪 + 臂运动安全流程 | 同上 |
+默认回放 [`examples/data/teach_points_left_right.txt`](data/teach_points_left_right.txt)：
 
 ```bash
-# 冒烟测试（默认不主动运动；可选 J1 偏移）
-./test_control_api
-./test_control_api 0.01
-
-# 夹爪测试（需硬件 + 配置）
-./test_gripper_api
-./test_dual_gripper_api
+./bin/cpp/teach_replay
+./bin/cpp/teach_replay ../../examples/data/teach_points.txt
+./bin/c/teach_replay ../../examples/data/teach_points_left_right.txt
 ```
 
 ---
 
-## 编写自己的程序
+## 配置路径
 
-```cpp
-#include "control_api.h"
+示例会从 `build/bin/cpp` 或 `build/bin/c` 自动查找 `../../../cuarm_configuration/dual_v2_2`。
 
-int main() {
-    // 示例程序用 default_config_path()；集成时建议传绝对路径
-    dual_arm_v2_2_sdk::ControlApi api("/path/to/dual_arm_v2_2_sdk/cuarm_configuration/dual_v2_2");
-    // ...
-}
+也可显式指定：
+
+```bash
+export DUAL_ARM_CONFIG_PREFIX=/path/to/cuarm_configuration/dual_v2_2
+./bin/c/test_gripper_api
 ```
 
-完整 API 见 [`../cpp/include/control_api.h`](../cpp/include/control_api.h) 与 [`../doc/`](../doc/) 接口文档。
+C++ 示例还支持命令行首参传入配置目录（见 `config_path_from_args`）。
+
+---
+
+## API 头文件
+
+- C++：[`cpp/include/control_api.h`](../cpp/include/control_api.h)
+- C：[`c/include/dual_arm_control_api.h`](../c/include/dual_arm_control_api.h)
