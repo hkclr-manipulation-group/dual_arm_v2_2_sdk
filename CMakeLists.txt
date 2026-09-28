@@ -39,6 +39,8 @@ if(DUAL_ARM_V2_2_SDK_BUILD_EXAMPLES)
     # Getting started
     add_sdk_example(go_home)
     add_sdk_example(move_arms_demo)
+    add_sdk_example(test_single_joint_increment)
+    add_sdk_example(test_get_joint_all)
 
     # Applications
     add_sdk_example(teach_replay)

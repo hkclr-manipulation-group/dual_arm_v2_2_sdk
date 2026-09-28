@@ -7,7 +7,7 @@
  *
  * 用法（在 build/ 或 build/bin/ 目录下均可）：
  *   ./bin/go_home
- *   ./go_home
+ *   ./go_home /path/to/cuarm_configuration/dual_v2_2   # 做法 A：显式配置路径
  */
 
 #include "control_api.h"
@@ -19,11 +19,13 @@
 using dual_arm_v2_2_sdk::ControlApi;
 using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
-using example::default_config_path;
+using example::config_path_from_args;
 using example::wait_for_joint_state;
 
-int main() {
-    ControlApi api(default_config_path());
+int main(int argc, char* argv[]) {
+    // 做法 A 也可直接在代码里写绝对路径，例如：
+    // ControlApi api("/home/delia/dual_arm/cuarm_panel_control/dual_arm_v2_2_sdk_rev/cuarm_configuration/dual_v2_2");
+    ControlApi api(config_path_from_args(argc, argv));
 
     std::vector<float> probe;
     if (!wait_for_joint_state(api, Group::LEFT_ARM, probe)) {

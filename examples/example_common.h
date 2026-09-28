@@ -4,6 +4,7 @@
 #include "control_api.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -20,9 +21,16 @@ inline std::filesystem::path executable_directory() {
 #endif
 }
 
-// Resolve paths from the executable location so examples work from build/ or build/bin/.
+// Resolve config prefix from env, CLI, or relative to the executable.
+// 做法 A（显式路径）任选其一：
+//   1) 环境变量: export DUAL_ARM_CONFIG_PREFIX=/path/to/cuarm_configuration/dual_v2_1
+//   2) 代码内写死: ControlApi api("/path/to/cuarm_configuration/dual_v2_1");
+//   3) 命令行首参: ./go_home /path/to/cuarm_configuration/dual_v2_1
 inline std::string default_config_path() {
     namespace fs = std::filesystem;
+    if (const char* env = std::getenv("DUAL_ARM_CONFIG_PREFIX")) {
+        return fs::path(env).string();
+    }
     const fs::path exe_dir = executable_directory();
     const std::vector<fs::path> candidates = {
         exe_dir / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
@@ -35,6 +43,18 @@ inline std::string default_config_path() {
         }
     }
     return fs::weakly_canonical(candidates.front()).string();
+}
+
+inline std::string config_path_from_args(int argc, char* argv[]) {
+    namespace fs = std::filesystem;
+    if (argc > 1) {
+        const fs::path candidate = argv[1];
+        std::error_code ec;
+        if (fs::exists(candidate / "config.yaml", ec)) {
+            return fs::weakly_canonical(candidate).string();
+        }
+    }
+    return default_config_path();
 }
 
 inline std::string default_teach_file_path() {
