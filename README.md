@@ -234,7 +234,8 @@ cutoff_hz = 20 * (1 / 20)^(radio / 999)
 
 ## 文档
 
-- 接口草案：[`doc/control_api_draft_20260902v1.pdf`](doc/control_api_draft_20260902v1.pdf)
+- 接口参考（Markdown）：[`doc/control_api.md`](doc/control_api.md)
+- 接口草案（PDF）：[`doc/control_api_draft_20260902v1.pdf`](doc/control_api_draft_20260902v1.pdf)
 - 示例详解：[`examples/README.md`](examples/README.md)
 - rt_control 构建：[`cuarm_rt_control`](https://github.com/CURI-Simulation-and-Software-Group/cuarm_rt_control)
 - 公共工具库：[`robot_platform_utils`](https://github.com/hkclr-manipulation-group/robot_platform_utils)

@@ -14,6 +14,7 @@
  *   ./test_dual_arm_100hz_follow both --left 20 --right 30
  *   ./test_dual_arm_100hz_follow all --left 10,20,30,40,50,60,70 --right 20
  *   ./test_dual_arm_100hz_follow both-flush   # set_joint_target + flush @100 Hz
+ *   ./test_dual_arm_100hz_follow both-stream  # set_left/right + SDK auto flush
  *
  * 目标偏移（可选，单位 deg，相对 stage 起始姿态）：
  *   --left  <deg>              左臂各轴相同偏移
@@ -128,7 +129,7 @@ std::vector<float> default_right_offsets_deg(const std::string& /*stage*/) {
 
 void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [mode] [--left <spec>] [--right <spec>]\n"
-              << "  mode: left | right | both | both-burst | both-thread | both-flush | all\n"
+              << "  mode: left | right | both | both-burst | both-thread | both-flush | both-stream | all\n"
               << "        (default: interactive left -> right -> both)\n"
               << "  --left, --right: offset in deg from stage start pose.\n"
               << "        One number  -> same offset on every joint.\n"
@@ -140,7 +141,8 @@ void print_usage(const char* prog) {
               << "    " << prog << " left --left 15\n"
               << "    " << prog << " both --left 20 --right 30\n"
               << "    " << prog << " all --left 10,20,30,40,50,60,70 --right 20\n"
-              << "    " << prog << " both-flush --left 20 --right 20\n";
+              << "    " << prog << " both-flush --left 20 --right 20\n"
+              << "    " << prog << " both-stream --left 20 --right 20\n";
 }
 
 bool parse_offset_spec(const std::string& text, std::vector<float>& out,
@@ -345,6 +347,10 @@ std::string describe_stage_motion(const std::string& name, bool use_left,
         oss << "@100 Hz set_joint_target + flush_joint_command; L "
             << format_offset_desc(left_offsets) << ", R "
             << format_offset_desc(right_offsets) << ".";
+    } else if (name == "both-stream") {
+        oss << "@100 Hz set_left/right_joint_target + SDK auto flush; L "
+            << format_offset_desc(left_offsets) << ", R "
+            << format_offset_desc(right_offsets) << ".";
     } else if (name == "all") {
         oss << "@100 Hz Group::ALL; L " << format_offset_desc(left_offsets)
             << ", R " << format_offset_desc(right_offsets) << " in one packet.";
@@ -394,6 +400,24 @@ void write_arm(ControlApi& api, ArmContext& arm) {
     const RetCode ret = api.move_joint(arm.group, arm.cmd, true, kTrajectoryMode,
                                        kRadio);
     if (ret != RetCode::SUCCESS) ++arm.stats.write_fail;
+}
+
+bool write_streaming_targets(ControlApi& api, const ArmContext& left,
+                             const ArmContext& right, ArmStats& left_stats,
+                             ArmStats& right_stats) {
+    RetCode ret = api.set_left_joint_target(left.cmd);
+    if (ret != RetCode::SUCCESS) {
+        ++left_stats.write_fail;
+        ++right_stats.write_fail;
+        return false;
+    }
+    ret = api.set_right_joint_target(right.cmd);
+    if (ret != RetCode::SUCCESS) {
+        ++left_stats.write_fail;
+        ++right_stats.write_fail;
+        return false;
+    }
+    return true;
 }
 
 bool flush_coalesced_targets(ControlApi& api, const ArmContext& left,
@@ -612,6 +636,7 @@ enum class DriveMode {
     SequentialBurst,
     Threaded,
     CoalescedFlush,
+    IndependentStreaming,
     GroupAll
 };
 
@@ -691,12 +716,28 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
         std::cout << "  Each 10 ms: set_joint_target(L), set_joint_target(R), "
                      "flush_joint_command().\n"
                      "  Unselected groups (head) held from feedback at flush.\n";
+    } else if (mode == DriveMode::IndependentStreaming) {
+        std::cout << "  SDK start_dual_arm_streaming() @100 Hz; each 10 ms only "
+                     "set_left/right_joint_target (no user flush).\n"
+                     "  Left/right keep last target; head held from feedback.\n";
     } else if (mode == DriveMode::GroupAll) {
         std::cout << "  One move_joint(ALL) per 10ms; both arm targets in the "
                      "same packet.\n";
     }
 
     if (mode == DriveMode::CoalescedFlush) api.reset_joint_target_cache();
+
+    const bool use_independent_streaming =
+        mode == DriveMode::IndependentStreaming && use_left && use_right;
+    if (use_independent_streaming) {
+        const RetCode stream_ret = api.start_dual_arm_streaming(
+            true, kTrajectoryMode, kRadio, kControlHz);
+        if (stream_ret != RetCode::SUCCESS) {
+            std::cerr << "start_dual_arm_streaming failed: "
+                      << ret_code_name(stream_ret) << '\n';
+            return false;
+        }
+    }
 
     const auto start_time = std::chrono::steady_clock::now();
     auto next_wakeup = start_time;
@@ -756,7 +797,9 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
             const float progress = std::min(elapsed / kDurationSeconds, 1.0F);
             const auto cycle_begin = std::chrono::steady_clock::now();
 
-            if (mode == DriveMode::CoalescedFlush && use_left && use_right) {
+            if ((mode == DriveMode::CoalescedFlush ||
+                 mode == DriveMode::IndependentStreaming) &&
+                use_left && use_right) {
                 read_arm(api, left);
                 read_arm(api, right);
                 if (over_velocity(left) || over_velocity(right)) {
@@ -765,7 +808,13 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
                 }
                 fill_cmd(left, progress);
                 fill_cmd(right, progress);
-                flush_coalesced_targets(api, left, right, left.stats, right.stats);
+                if (mode == DriveMode::CoalescedFlush) {
+                    flush_coalesced_targets(api, left, right, left.stats,
+                                            right.stats);
+                } else {
+                    write_streaming_targets(api, left, right, left.stats,
+                                            right.stats);
+                }
                 update_stats(left, elapsed);
                 update_stats(right, elapsed);
                 const double cycle_ms =
@@ -925,6 +974,8 @@ bool run_stage(ControlApi& api, const char* stage, DriveMode mode,
         }
     }
 
+    if (use_independent_streaming) api.stop_dual_arm_streaming();
+
     if (safety.load()) {
         std::cerr << "\nSAFETY STOP: joint velocity exceeded "
                   << kGuardVelocityDegS << " deg/s. Holding current pose.\n";
@@ -973,7 +1024,7 @@ int main(int argc, char** argv) {
     } else if (args.mode == "left" || args.mode == "right" ||
                args.mode == "both" || args.mode == "both-burst" ||
                args.mode == "both-thread" || args.mode == "both-flush" ||
-               args.mode == "all") {
+               args.mode == "both-stream" || args.mode == "all") {
         add(args.mode);
     } else {
         std::cerr << "Unknown mode '" << args.mode << "'\n";
@@ -1053,6 +1104,11 @@ int main(int argc, char** argv) {
                 use_right = true;
                 mode = DriveMode::CoalescedFlush;
                 label = "BOTH coalesced (set_joint_target + flush @100 Hz)";
+            } else if (name == "both-stream") {
+                use_left = true;
+                use_right = true;
+                mode = DriveMode::IndependentStreaming;
+                label = "BOTH independent streaming (set_left/right, SDK flush)";
             } else if (name == "all") {
                 use_left = true;
                 use_right = true;
@@ -1107,6 +1163,7 @@ int main(int argc, char** argv) {
                      "  both-burst  : second packet often dropped; first arm tracks.\n"
                      "  both-thread : two threads @50 Hz each, right delayed 10 ms.\n"
                      "  both-flush  : set_joint_target + flush @100 Hz (SDK coalesce).\n"
+                     "  both-stream : set_left/right + SDK auto flush @100 Hz.\n"
                      "  all         : both arms sync via Group::ALL @100 Hz.\n";
         return 0;
     } catch (const std::exception& error) {

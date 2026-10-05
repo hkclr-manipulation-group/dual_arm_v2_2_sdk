@@ -60,6 +60,14 @@ struct ControlApi::Impl {
     bool joint_target_cache_valid = false;
     float joint_target_cache[MAX_ARM_SIZE][MAX_JOINT_SIZE]{};
     std::array<bool, MAX_ARM_SIZE> arm_target_dirty{};
+    std::thread streaming_thread;
+    std::atomic<bool> streaming_active{false};
+    bool streaming_follow = true;
+    uint8_t streaming_trajectory_mode = 2;
+    uint16_t streaming_radio = 999;
+    int streaming_hz = 100;
+
+    static bool is_streaming_arm(int arm) { return arm == 0 || arm == 2; }
 
     explicit Impl(const std::string& prefix) {
         config = loadYamlConfig(prefix + "/config.yaml");
@@ -76,7 +84,11 @@ struct ControlApi::Impl {
         receive_thread = std::thread(&Impl::receive_loop, this);
     }
 
-    ~Impl() {
+    ~Impl() { stop_streaming_loop(); }
+
+    void stop_streaming_loop() {
+        streaming_active.store(false);
+        if (streaming_thread.joinable()) streaming_thread.join();
         shutdown.store(true);
         if (receive_thread.joinable()) receive_thread.join();
         if (udp) udp->close();
@@ -308,13 +320,43 @@ struct ControlApi::Impl {
         return true;
     }
 
-    void hold_unflushed_groups_in_cache() {
+    void hold_unflushed_groups_in_cache(bool sticky_left_right) {
         if (!received_state.load()) return;
         const PlannerState snapshot = state_snapshot();
         for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (sticky_left_right && is_streaming_arm(arm)) continue;
             if (arm_target_dirty[arm]) continue;
             for (int joint = 0; joint < joint_sizes[arm]; ++joint)
                 joint_target_cache[arm][joint] = snapshot.JointPos[arm][joint];
+        }
+    }
+
+    RetCode set_joint_target_locked(Group group, const std::vector<float>& joints) {
+        const auto indices = group_indices(group);
+        if (indices.empty() || joints.size() != expected_joint_count(group))
+            return RetCode::CONTROLLER_ERROR;
+        if (!ensure_joint_target_cache()) return RetCode::RECEIVE_FAILED;
+
+        size_t source = 0;
+        for (int arm : indices) {
+            arm_target_dirty[arm] = true;
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint)
+                joint_target_cache[arm][joint] = joints[source++];
+        }
+        return RetCode::SUCCESS;
+    }
+
+    void streaming_loop() {
+        const int period_ms = streaming_hz > 0 ? 1000 / streaming_hz : 10;
+        auto next_wakeup = std::chrono::steady_clock::now();
+        while (streaming_active.load()) {
+            {
+                std::lock_guard<std::mutex> lock(command_mutex);
+                send_cached_joint_command(streaming_follow, streaming_trajectory_mode,
+                                          streaming_radio, true);
+            }
+            next_wakeup += std::chrono::milliseconds(period_ms);
+            std::this_thread::sleep_until(next_wakeup);
         }
     }
 
@@ -351,14 +393,15 @@ struct ControlApi::Impl {
     }
 
     RetCode send_cached_joint_command(bool follow, uint8_t trajectory_mode,
-                                      uint16_t radio) {
+                                      uint16_t radio,
+                                      bool sticky_left_right = false) {
         if (!ensure_joint_target_cache()) return RetCode::RECEIVE_FAILED;
         if (follow && (trajectory_mode > 2 ||
                        (trajectory_mode == 1 && radio > 100) ||
                        (trajectory_mode == 2 && radio > 999)))
             return RetCode::CONTROLLER_ERROR;
 
-        hold_unflushed_groups_in_cache();
+        hold_unflushed_groups_in_cache(sticky_left_right);
         apply_joint_motion_profile(follow, trajectory_mode, radio);
         for (int arm = 0; arm < command.ArmSize; ++arm)
             for (int joint = 0; joint < joint_sizes[arm]; ++joint)
@@ -383,7 +426,7 @@ struct ControlApi::Impl {
 ControlApi::ControlApi(const std::string& config_prefix_path)
     : impl_(std::make_unique<Impl>(config_prefix_path)) {}
 
-ControlApi::~ControlApi() = default;
+ControlApi::~ControlApi() { stop_dual_arm_streaming(); }
 
 RetCode ControlApi::set_group(Group group, bool enable) {
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
@@ -449,30 +492,67 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
 RetCode ControlApi::set_joint_target(Group group,
                                      const std::vector<float>& joints) {
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
-    const auto indices = impl_->group_indices(group);
-    if (indices.empty() || joints.size() != impl_->expected_joint_count(group))
-        return RetCode::CONTROLLER_ERROR;
-    if (!impl_->ensure_joint_target_cache()) return RetCode::RECEIVE_FAILED;
-
-    size_t source = 0;
-    for (int arm : indices) {
-        impl_->arm_target_dirty[arm] = true;
-        for (int joint = 0; joint < impl_->joint_sizes[arm]; ++joint)
-            impl_->joint_target_cache[arm][joint] = joints[source++];
-    }
-    return RetCode::SUCCESS;
+    return impl_->set_joint_target_locked(group, joints);
 }
 
 RetCode ControlApi::flush_joint_command(bool follow, uint8_t trajectory_mode,
                                         uint16_t radio) {
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
-    return impl_->send_cached_joint_command(follow, trajectory_mode, radio);
+    return impl_->send_cached_joint_command(follow, trajectory_mode, radio, false);
 }
 
 void ControlApi::reset_joint_target_cache() {
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
     impl_->joint_target_cache_valid = false;
     impl_->clear_arm_target_dirty();
+}
+
+RetCode ControlApi::set_left_joint_target(const std::vector<float>& joints) {
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    return impl_->set_joint_target_locked(Group::LEFT_ARM, joints);
+}
+
+RetCode ControlApi::set_right_joint_target(const std::vector<float>& joints) {
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    return impl_->set_joint_target_locked(Group::RIGHT_ARM, joints);
+}
+
+RetCode ControlApi::start_dual_arm_streaming(bool follow, uint8_t trajectory_mode,
+                                             uint16_t radio, int hz) {
+    if (hz <= 0 || hz > 1000) return RetCode::CONTROLLER_ERROR;
+    if (follow && (trajectory_mode > 2 ||
+                   (trajectory_mode == 1 && radio > 100) ||
+                   (trajectory_mode == 2 && radio > 999)))
+        return RetCode::CONTROLLER_ERROR;
+    if (impl_->streaming_active.load()) return RetCode::CONTROLLER_ERROR;
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->command_mutex);
+        if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
+
+        impl_->joint_target_cache_valid = false;
+        impl_->clear_arm_target_dirty();
+        if (!impl_->ensure_joint_target_cache()) return RetCode::RECEIVE_FAILED;
+
+        impl_->streaming_follow = follow;
+        impl_->streaming_trajectory_mode = trajectory_mode;
+        impl_->streaming_radio = radio;
+        impl_->streaming_hz = hz;
+    }
+
+    impl_->streaming_active.store(true);
+    impl_->streaming_thread =
+        std::thread(&Impl::streaming_loop, impl_.get());
+    return RetCode::SUCCESS;
+}
+
+void ControlApi::stop_dual_arm_streaming() {
+    impl_->streaming_active.store(false);
+    if (impl_->streaming_thread.joinable()) impl_->streaming_thread.join();
+}
+
+bool ControlApi::is_dual_arm_streaming() const {
+    return impl_->streaming_active.load();
 }
 
 std::tuple<RetCode, std::vector<float>> ControlApi::get_joint(Group group) const {

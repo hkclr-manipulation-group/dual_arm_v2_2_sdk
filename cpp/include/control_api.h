@@ -57,6 +57,18 @@ public:
                                 uint16_t radio = 0);
     void reset_joint_target_cache();
 
+    // Independent dual-arm streaming (e.g. async left/right task loops).
+    // start_dual_arm_streaming() runs an internal 100 Hz sender; each cycle
+    // emits one packet with the latest left/right cache. Unupdated arms keep
+    // their last target (not feedback-hold). Head uses feedback when not dirty.
+    RetCode set_left_joint_target(const std::vector<float>& joints);
+    RetCode set_right_joint_target(const std::vector<float>& joints);
+    RetCode start_dual_arm_streaming(bool follow = true,
+                                     uint8_t trajectory_mode = 2,
+                                     uint16_t radio = 999, int hz = 100);
+    void stop_dual_arm_streaming();
+    bool is_dual_arm_streaming() const;
+
     std::tuple<RetCode, std::vector<float>> get_joint(Group group) const;
     std::tuple<RetCode, std::vector<float>> get_joint_velocity(Group group) const;
 

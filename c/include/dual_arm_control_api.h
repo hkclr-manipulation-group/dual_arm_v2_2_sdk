@@ -78,6 +78,23 @@ dual_arm_ret_code_t dual_arm_flush_joint_command(dual_arm_control_api_t* api,
 
 void dual_arm_reset_joint_target_cache(dual_arm_control_api_t* api);
 
+dual_arm_ret_code_t dual_arm_set_left_joint_target(dual_arm_control_api_t* api,
+                                                   const float* joints,
+                                                   size_t joint_count);
+
+dual_arm_ret_code_t dual_arm_set_right_joint_target(dual_arm_control_api_t* api,
+                                                    const float* joints,
+                                                    size_t joint_count);
+
+dual_arm_ret_code_t dual_arm_start_dual_arm_streaming(dual_arm_control_api_t* api,
+                                                      int follow,
+                                                      uint8_t trajectory_mode,
+                                                      uint16_t radio, int hz);
+
+void dual_arm_stop_dual_arm_streaming(dual_arm_control_api_t* api);
+
+int dual_arm_is_dual_arm_streaming(dual_arm_control_api_t* api);
+
 dual_arm_ret_code_t dual_arm_get_joint(dual_arm_control_api_t* api,
                                        dual_arm_group_t group,
                                        float* out_joints, size_t out_capacity,

@@ -236,6 +236,81 @@ extern "C" void dual_arm_reset_joint_target_cache(dual_arm_control_api_t* api) {
     }
 }
 
+extern "C" dual_arm_ret_code_t dual_arm_set_left_joint_target(
+    dual_arm_control_api_t* api, const float* joints, size_t joint_count) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    if (joints == nullptr && joint_count > 0) {
+        set_last_error("joints is NULL");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        const std::vector<float> values(joints, joints + joint_count);
+        return to_c_ret(api->cpp->set_left_joint_target(values));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_set_right_joint_target(
+    dual_arm_control_api_t* api, const float* joints, size_t joint_count) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    if (joints == nullptr && joint_count > 0) {
+        set_last_error("joints is NULL");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        const std::vector<float> values(joints, joints + joint_count);
+        return to_c_ret(api->cpp->set_right_joint_target(values));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_start_dual_arm_streaming(
+    dual_arm_control_api_t* api, int follow, uint8_t trajectory_mode,
+    uint16_t radio, int hz) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        return to_c_ret(api->cpp->start_dual_arm_streaming(
+            follow != 0, trajectory_mode, radio, hz));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" void dual_arm_stop_dual_arm_streaming(dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        return;
+    }
+    try {
+        api->cpp->stop_dual_arm_streaming();
+    } catch (...) {
+    }
+}
+
+extern "C" int dual_arm_is_dual_arm_streaming(dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        return 0;
+    }
+    try {
+        return api->cpp->is_dual_arm_streaming() ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 extern "C" dual_arm_ret_code_t dual_arm_get_joint(dual_arm_control_api_t* api,
                                                   dual_arm_group_t group,
                                                   float* out_joints,

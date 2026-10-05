@@ -14,6 +14,7 @@
  *   ./test_dual_arm_100hz_follow both --left 20 --right 30
  *   ./test_dual_arm_100hz_follow all --left 10,20,30,40,50,60,70 --right 20
  *   ./test_dual_arm_100hz_follow both-flush   # set_joint_target + flush @100 Hz
+ *   ./test_dual_arm_100hz_follow both-stream  # set_left/right + SDK auto flush
  *
  * 目标偏移（可选，单位 deg，相对 stage 起始姿态）：
  *   --left  <deg>              左臂各轴相同偏移
@@ -115,6 +116,7 @@ typedef enum {
     DRIVE_SEQUENTIAL_BURST,
     DRIVE_THREADED,
     DRIVE_COALESCED_FLUSH,
+    DRIVE_INDEPENDENT_STREAMING,
     DRIVE_GROUP_ALL,
 } DriveMode;
 
@@ -189,7 +191,7 @@ static void default_right_offsets_deg(const char* stage, float* out,
 static void print_usage(const char* prog) {
     printf("Usage: %s [mode] [--left <spec>] [--right <spec>]\n"
            "  mode: left | right | both | both-burst | both-thread | "
-           "both-flush | all\n"
+           "both-flush | both-stream | all\n"
            "        (default: interactive left -> right -> both)\n"
            "  --left, --right: offset in deg from stage start pose.\n"
            "        One number  -> same offset on every joint.\n"
@@ -201,8 +203,9 @@ static void print_usage(const char* prog) {
            "    %s left --left 15\n"
            "    %s both --left 20 --right 30\n"
            "    %s all --left 10,20,30,40,50,60,70 --right 20\n"
-           "    %s both-flush --left 20 --right 20\n",
-           prog, prog, prog, prog, prog);
+           "    %s both-flush --left 20 --right 20\n"
+           "    %s both-stream --left 20 --right 20\n",
+           prog, prog, prog, prog, prog, prog);
 }
 
 static int parse_offset_spec(const char* text, float* out, size_t* out_count,
@@ -454,6 +457,11 @@ static void describe_stage_motion(const char* name, int use_left, int use_right,
                  "8 s high-follow: @100 Hz set_joint_target + "
                  "flush_joint_command; L %s, R %s.",
                  left_desc, right_desc);
+    } else if (strcmp(name, "both-stream") == 0) {
+        snprintf(out, out_size,
+                 "8 s high-follow: @100 Hz set_left/right_joint_target + "
+                 "SDK auto flush; L %s, R %s.",
+                 left_desc, right_desc);
     } else if (strcmp(name, "all") == 0) {
         snprintf(out, out_size,
                  "8 s high-follow: @100 Hz Group::ALL; L %s, R %s in one "
@@ -549,6 +557,27 @@ static int flush_coalesced_targets(dual_arm_control_api_t* api,
         return 0;
     }
     ret = dual_arm_flush_joint_command(api, 1, kTrajectoryMode, kRadio);
+    if (ret != DUAL_ARM_RET_SUCCESS) {
+        ++left_stats->write_fail;
+        ++right_stats->write_fail;
+        return 0;
+    }
+    return 1;
+}
+
+static int write_streaming_targets(dual_arm_control_api_t* api,
+                                   const ArmContext* left,
+                                   const ArmContext* right,
+                                   ArmStats* left_stats,
+                                   ArmStats* right_stats) {
+    dual_arm_ret_code_t ret =
+        dual_arm_set_left_joint_target(api, left->cmd, left->joint_count);
+    if (ret != DUAL_ARM_RET_SUCCESS) {
+        ++left_stats->write_fail;
+        ++right_stats->write_fail;
+        return 0;
+    }
+    ret = dual_arm_set_right_joint_target(api, right->cmd, right->joint_count);
     if (ret != DUAL_ARM_RET_SUCCESS) {
         ++left_stats->write_fail;
         ++right_stats->write_fail;
@@ -937,6 +966,10 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
         printf("  Each 10 ms: set_joint_target(L), set_joint_target(R), "
                "flush_joint_command().\n"
                "  Unselected groups (head) held from feedback at flush.\n");
+    } else if (mode == DRIVE_INDEPENDENT_STREAMING) {
+        printf("  SDK start_dual_arm_streaming() @100 Hz; each 10 ms only "
+               "set_left/right_joint_target (no user flush).\n"
+               "  Left/right keep last target; head held from feedback.\n");
     } else if (mode == DRIVE_GROUP_ALL) {
         printf("  One move_joint(ALL) per 10ms; both arm targets in the "
                "same packet.\n");
@@ -944,6 +977,19 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
 
     if (mode == DRIVE_COALESCED_FLUSH) {
         dual_arm_reset_joint_target_cache(api);
+    }
+
+    const int use_independent_streaming =
+        (mode == DRIVE_INDEPENDENT_STREAMING && use_left && use_right);
+    if (use_independent_streaming) {
+        const dual_arm_ret_code_t stream_ret =
+            dual_arm_start_dual_arm_streaming(api, 1, kTrajectoryMode, kRadio,
+                                              kControlHz);
+        if (stream_ret != DUAL_ARM_RET_SUCCESS) {
+            fprintf(stderr, "start_dual_arm_streaming failed: %s\n",
+                    dual_arm_ret_code_name(stream_ret));
+            return 0;
+        }
     }
 
     struct timespec start_time;
@@ -997,7 +1043,9 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
             }
             struct timespec cycle_begin = now_ts;
 
-            if (mode == DRIVE_COALESCED_FLUSH && use_left && use_right) {
+            if ((mode == DRIVE_COALESCED_FLUSH ||
+                 mode == DRIVE_INDEPENDENT_STREAMING) &&
+                use_left && use_right) {
                 read_arm(api, &left);
                 read_arm(api, &right);
                 if (over_velocity(&left) || over_velocity(&right)) {
@@ -1006,8 +1054,13 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
                 }
                 fill_cmd(&left, progress);
                 fill_cmd(&right, progress);
-                flush_coalesced_targets(api, &left, &right, &left.stats,
-                                        &right.stats);
+                if (mode == DRIVE_COALESCED_FLUSH) {
+                    flush_coalesced_targets(api, &left, &right, &left.stats,
+                                            &right.stats);
+                } else {
+                    write_streaming_targets(api, &left, &right, &left.stats,
+                                            &right.stats);
+                }
                 update_stats(&left, elapsed);
                 update_stats(&right, elapsed);
 
@@ -1175,6 +1228,10 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
         }
     }
 
+    if (use_independent_streaming) {
+        dual_arm_stop_dual_arm_streaming(api);
+    }
+
     if (safety) {
         fprintf(stderr,
                 "\nSAFETY STOP: joint velocity exceeded %.0f deg/s. Holding "
@@ -1220,6 +1277,7 @@ int main(int argc, char** argv) {
                strcmp(args.mode, "both-burst") == 0 ||
                strcmp(args.mode, "both-thread") == 0 ||
                strcmp(args.mode, "both-flush") == 0 ||
+               strcmp(args.mode, "both-stream") == 0 ||
                strcmp(args.mode, "all") == 0) {
         snprintf(stages[stage_count++], kMaxModeLen, "%s", args.mode);
     } else {
@@ -1328,6 +1386,11 @@ int main(int argc, char** argv) {
             use_right = 1;
             mode = DRIVE_COALESCED_FLUSH;
             label = "BOTH coalesced (set_joint_target + flush @100 Hz)";
+        } else if (strcmp(name, "both-stream") == 0) {
+            use_left = 1;
+            use_right = 1;
+            mode = DRIVE_INDEPENDENT_STREAMING;
+            label = "BOTH independent streaming (set_left/right, SDK flush)";
         } else if (strcmp(name, "all") == 0) {
             use_left = 1;
             use_right = 1;
@@ -1412,6 +1475,7 @@ int main(int argc, char** argv) {
            "  both-burst  : second packet often dropped; first arm tracks.\n"
            "  both-thread : two threads @50 Hz each, right delayed 10 ms.\n"
            "  both-flush  : set_joint_target + flush @100 Hz (SDK coalesce).\n"
+           "  both-stream : set_left/right + SDK auto flush @100 Hz.\n"
            "  all         : both arms sync via Group::ALL @100 Hz.\n");
 
     dual_arm_control_api_destroy(api);
