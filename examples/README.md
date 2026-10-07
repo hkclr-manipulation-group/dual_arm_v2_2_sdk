@@ -45,6 +45,7 @@ cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF
 | 冒烟测试 | `test_control_api` | 同左 | 交互式 API 测试 |
 | 夹爪 | `test_gripper_api` | 同左 | 左夹爪 API |
 | 100Hz 跟随 | `test_dual_arm_100hz_follow` | 同左 | 高跟随模式对比 |
+| 错峰双臂流式 | — | `staggered_dual_arm_stream` | 左先动→右再动→左先回零→右再回零 |
 
 完整列表见根目录 `CMakeLists.txt` 中的 `_dual_arm_cpp_examples`。
 

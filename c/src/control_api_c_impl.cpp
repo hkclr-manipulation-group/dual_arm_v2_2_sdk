@@ -168,6 +168,59 @@ extern "C" dual_arm_ret_code_t dual_arm_get_group_state(
     }
 }
 
+extern "C" dual_arm_ret_code_t dual_arm_move_line(
+    dual_arm_control_api_t* api, dual_arm_group_t group,
+    const float* target_tool_pose, size_t pose_count, uint16_t speed_ratio,
+    float acc_time) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    if (target_tool_pose == nullptr && pose_count > 0) {
+        set_last_error("target_tool_pose is NULL");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        const std::vector<float> values(target_tool_pose,
+                                        target_tool_pose + pose_count);
+        return to_c_ret(api->cpp->move_line(to_cpp_group(group), values,
+                                            speed_ratio, acc_time));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_get_tool_pose(
+    dual_arm_control_api_t* api, dual_arm_group_t group, float* out_pose,
+    size_t out_capacity, size_t* out_count) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    if (out_count == nullptr) {
+        set_last_error("out_count is NULL");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    *out_count = 0;
+    try {
+        const auto [code, pose] =
+            api->cpp->get_tool_pose(to_cpp_group(group));
+        if (code != dual_arm_v2_2_sdk::RetCode::SUCCESS) {
+            return to_c_ret(code);
+        }
+        if (out_pose != nullptr) {
+            const size_t n = std::min(out_capacity, pose.size());
+            for (size_t i = 0; i < n; ++i) out_pose[i] = pose[i];
+        }
+        *out_count = pose.size();
+        return DUAL_ARM_RET_SUCCESS;
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
 extern "C" dual_arm_ret_code_t dual_arm_move_joint(
     dual_arm_control_api_t* api, dual_arm_group_t group, const float* joints,
     size_t joint_count, int follow, uint8_t trajectory_mode, uint16_t radio) {

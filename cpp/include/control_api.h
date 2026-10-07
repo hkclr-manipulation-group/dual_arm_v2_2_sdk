@@ -48,6 +48,16 @@ public:
                        bool follow = false, uint8_t trajectory_mode = 0,
                        uint16_t radio = 0);
 
+    // Cartesian line move (MoveL), matching dual_arm_sdk moveToolLine / kTaskLine.
+    // target_tool_pose layout per arm: x, y, z (m), qw, qx, qy, qz — same frame as
+    // get_tool_pose() / PlannerState ToolPose. LEFT_ARM or RIGHT_ARM -> 7 floats;
+    // ALL -> 14 floats (left arm then right arm; head is held with zero task delta).
+    RetCode move_line(Group group, const std::vector<float>& target_tool_pose,
+                      uint16_t speed_ratio = 50, float acc_time = 0.0f);
+
+    // Read current tool pose feedback (7 floats per arm: x,y,z,qw,qx,qy,qz).
+    std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
+
     // Coalesced dual-arm streaming: update cached targets without sending.
     // Call set_joint_target() for each group, then flush_joint_command() once
     // per control cycle. Groups not updated since the last flush are held at

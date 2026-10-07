@@ -66,6 +66,18 @@ dual_arm_ret_code_t dual_arm_move_joint(dual_arm_control_api_t* api,
                                         int follow, uint8_t trajectory_mode,
                                         uint16_t radio);
 
+/** MoveL: 7 floats per arm (x,y,z,qw,qx,qy,qz). LEFT/RIGHT -> 7; ALL -> 14. */
+dual_arm_ret_code_t dual_arm_move_line(dual_arm_control_api_t* api,
+                                       dual_arm_group_t group,
+                                       const float* target_tool_pose,
+                                       size_t pose_count,
+                                       uint16_t speed_ratio, float acc_time);
+
+dual_arm_ret_code_t dual_arm_get_tool_pose(dual_arm_control_api_t* api,
+                                           dual_arm_group_t group,
+                                           float* out_pose, size_t out_capacity,
+                                           size_t* out_count);
+
 dual_arm_ret_code_t dual_arm_set_joint_target(dual_arm_control_api_t* api,
                                               dual_arm_group_t group,
                                               const float* joints,

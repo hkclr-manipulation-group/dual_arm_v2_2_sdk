@@ -159,6 +159,40 @@ C：`dual_arm_move_joint(api, group, joints, joint_count, follow, trajectory_mod
 
 ---
 
+## 5.1 笛卡尔直线：`move_line`（MoveL / `kTaskLine`）
+
+```cpp
+RetCode move_line(Group group,
+                  const std::vector<float>& target_tool_pose,
+                  uint16_t speed_ratio = 50,
+                  float acc_time = 0.0f);
+
+std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
+```
+
+| 参数 | 说明 |
+|------|------|
+| `group` | `LEFT_ARM` / `RIGHT_ARM` / `ALL`（`HEAD` 不支持） |
+| `target_tool_pose` | 每臂 7 个数：`x,y,z`（m）+ `qw,qx,qy,qz`；单臂 7 个，`ALL` 为左 7 + 右 14 |
+| `speed_ratio` | 0..100，映射到 `interpolation_speed_ratio` |
+| `acc_time` | 加速时间（s）；0 表示用 `config.yaml` 默认值 |
+
+**行为**（与 `dual_arm_sdk` 的 `moveToolLine` 一致）：
+
+- 从 `PlannerState::ToolPose` 读当前位姿，计算相对增量写入 `TaskCmdDeg`
+- 未参与运动的 arm：`TaskCmdDeg = 0`（保持不动）
+- `motion_type = kTaskLine`，阻塞等待 ACK
+- **dual-arm streaming 激活时**返回 `CONTROLLER_ERROR`
+
+C：
+
+- `dual_arm_move_line(api, group, pose, pose_count, speed_ratio, acc_time)`
+- `dual_arm_get_tool_pose(api, group, out_pose, capacity, &count)`
+
+示例：`examples/cpp/test_move_line.cpp`、`examples/c/test_move_line.c`。
+
+---
+
 ## 6. 关节运动：合并发包（Coalesced Flush）
 
 适用于**同一控制周期内**更新左/右（或头）目标，**只发一个 UDP 包**。

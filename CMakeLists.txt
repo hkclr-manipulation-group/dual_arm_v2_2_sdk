@@ -30,6 +30,7 @@ add_subdirectory(c)
 set(_dual_arm_cpp_examples
     go_home
     move_arms_demo
+    test_move_line
     test_single_joint_increment
     test_get_joint_all
     teach_replay
@@ -40,6 +41,7 @@ set(_dual_arm_cpp_examples
     test_dual_gripper_api
     test_arm_gripper_safe
     test_dual_arm_100hz_follow
+    staggered_dual_arm_stream
 )
 
 option(DUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES "Build C++ SDK example programs" ON)
@@ -82,8 +84,12 @@ if(DUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES)
     foreach(_dual_arm_example ${_dual_arm_cpp_examples})
         add_sdk_c_example(${_dual_arm_example})
     endforeach()
+    foreach(_dual_arm_example ${_dual_arm_c_only_examples})
+        add_sdk_c_example(${_dual_arm_example})
+    endforeach()
 
     unset(_dual_arm_c_example_dir)
 endif()
 
 unset(_dual_arm_cpp_examples)
+unset(_dual_arm_c_only_examples)

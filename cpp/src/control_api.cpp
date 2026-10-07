@@ -23,7 +23,12 @@ namespace {
 
 constexpr int kBufferSize = 4096;
 constexpr int kAckTimeoutMs = 200;
+constexpr int kTaskAckTimeoutMs = 10000;
+constexpr int kTaskResendTimeoutMs = 1000;
+constexpr float kDegToRad = static_cast<float>(M_PI) / 180.0F;
 constexpr float kMinimumProfileTime = 0.01F;
+constexpr float kTaskPosEpsM = 1e-5F;
+constexpr float kTaskOriEpsRad = 1e-4F;
 
 float curve_fit_time(uint16_t radio) {
     // 0..100 maps to 10 ms..1.01 s; a larger value produces a smoother fit.
@@ -37,6 +42,55 @@ float filter_cutoff_frequency(uint16_t radio) {
     const float normalized = static_cast<float>(radio) / 999.0F;
     return kMaximumCutoffHz *
            std::pow(kMinimumCutoffHz / kMaximumCutoffHz, normalized);
+}
+
+constexpr int kToolPoseSize = 7;
+
+struct EulerRpy {
+    float roll;
+    float pitch;
+    float yaw;
+};
+
+EulerRpy quaternion_to_euler(float w, float x, float y, float z) {
+    const float sinr_cosp = 2.0F * (w * x + y * z);
+    const float cosr_cosp = 1.0F - 2.0F * (x * x + y * y);
+    const float roll = std::atan2(sinr_cosp, cosr_cosp);
+
+    const float sinp = 2.0F * (w * y - z * x);
+    float pitch;
+    if (std::abs(sinp) >= 1.0F) {
+        pitch = std::copysign(static_cast<float>(M_PI) / 2.0F, sinp);
+    } else {
+        pitch = std::asin(sinp);
+    }
+
+    const float siny_cosp = 2.0F * (w * z + x * y);
+    const float cosy_cosp = 1.0F - 2.0F * (y * y + z * z);
+    const float yaw = std::atan2(siny_cosp, cosy_cosp);
+    return {roll, pitch, yaw};
+}
+
+void fill_task_line_delta(float* task_cmd_deg,
+                          const float current_tool_pose[kToolPoseSize],
+                          const float target_tool_pose[kToolPoseSize]) {
+    const EulerRpy current_euler = quaternion_to_euler(
+        current_tool_pose[3], current_tool_pose[4],
+        current_tool_pose[5], current_tool_pose[6]);
+    const EulerRpy target_euler = quaternion_to_euler(
+        target_tool_pose[3], target_tool_pose[4],
+        target_tool_pose[5], target_tool_pose[6]);
+
+    task_cmd_deg[0] = target_tool_pose[0] - current_tool_pose[0];
+    task_cmd_deg[1] = target_tool_pose[1] - current_tool_pose[1];
+    task_cmd_deg[2] = target_tool_pose[2] - current_tool_pose[2];
+    task_cmd_deg[3] = target_euler.roll - current_euler.roll;
+    task_cmd_deg[4] = target_euler.pitch - current_euler.pitch;
+    task_cmd_deg[5] = target_euler.yaw - current_euler.yaw;
+}
+
+float clamp_speed_ratio(uint16_t speed_ratio) {
+    return std::clamp(static_cast<float>(speed_ratio) / 100.0F, 0.0F, 1.0F);
 }
 
 }  // namespace
@@ -66,6 +120,10 @@ struct ControlApi::Impl {
     uint8_t streaming_trajectory_mode = 2;
     uint16_t streaming_radio = 999;
     int streaming_hz = 100;
+    float receive_dt_us_ = 9000.0F;
+    MotionControl last_motion_type_ = MotionControl::kJoint;
+    ControlType last_target_type_ = ControlType::kPosition;
+    ControlType last_actuator_mode_ = ControlType::kPosition;
 
     static bool is_streaming_arm(int arm) { return arm == 0 || arm == 2; }
 
@@ -145,6 +203,11 @@ struct ControlApi::Impl {
             command.GripperSpeed[gripper] = CUARM_GRIPPER_DEFAULT_SPEED;
             command.GripperForce[gripper] = CUARM_GRIPPER_DEFAULT_FORCE;
         }
+
+        receive_dt_us_ = config["panel"]["dt_receive"].as<float>() * 1000000.0F;
+        last_motion_type_ = static_cast<MotionControl>(command.motion_type);
+        last_target_type_ = command.target_type;
+        last_actuator_mode_ = command.actuator_mode;
     }
 
     void receive_loop() {
@@ -170,6 +233,19 @@ struct ControlApi::Impl {
             case Group::ELEVATOR: return {};
         }
         return {};
+    }
+
+    std::vector<int> tool_arm_indices(Group group) const {
+        switch (group) {
+            case Group::ALL: return {0, 2};
+            case Group::LEFT_ARM: return {0};
+            case Group::RIGHT_ARM: return {2};
+            default: return {};
+        }
+    }
+
+    size_t expected_tool_pose_count(Group group) const {
+        return tool_arm_indices(group).size() * static_cast<size_t>(kToolPoseSize);
     }
 
     size_t expected_joint_count(Group group) const {
@@ -246,6 +322,66 @@ struct ControlApi::Impl {
         return wait_for_ack(sequence, generation_before_send, timeout_ms)
                    ? RetCode::SUCCESS
                    : RetCode::TIMEOUT;
+    }
+
+    void sync_task_cmd_from_deg() {
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            for (int axis = 0; axis < 6; ++axis) {
+                command.TaskCmd[arm][axis] = command.TaskCmdDeg[arm][axis];
+                if (axis > 2) command.TaskCmd[arm][axis] *= kDegToRad;
+            }
+        }
+    }
+
+    bool is_latest_target_received() const {
+        return state_snapshot().received_sequence_id == command.sequence_id - 1;
+    }
+
+    RetCode send_task_with_ack() {
+        if (command.actuator_mode != last_actuator_mode_ ||
+            static_cast<MotionControl>(command.motion_type) !=
+                last_motion_type_ ||
+            command.reset_interpolation || command.reset_control_mem) {
+            command.need_setting_update = true;
+        }
+
+        const int poll_ms =
+            std::max(1, static_cast<int>(receive_dt_us_ * 2.0F / 1000.0F));
+        int elapsed_ms = 0;
+        bool need_send = true;
+
+        while (elapsed_ms < kTaskAckTimeoutMs && need_send) {
+            synchronize_sequence_with_planner();
+            sync_task_cmd_from_deg();
+            if (!send_once()) return RetCode::SEND_FAILED;
+
+            int wait_ms = 0;
+            while (wait_ms < kTaskResendTimeoutMs) {
+                const PlannerState snapshot = state_snapshot();
+                if (command.need_setting_update) {
+                    if (snapshot.received_sequence_id == command.sequence_id - 1) {
+                        command.need_setting_update = false;
+                        command.reset_interpolation = false;
+                        command.reset_control_mem = false;
+                        break;
+                    }
+                } else if (snapshot.setting_update_finished &&
+                           snapshot.received_sequence_id ==
+                               command.sequence_id - 1) {
+                    need_send = false;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_ms));
+                wait_ms += poll_ms;
+            }
+
+            last_motion_type_ = static_cast<MotionControl>(command.motion_type);
+            last_target_type_ = command.target_type;
+            last_actuator_mode_ = command.actuator_mode;
+            elapsed_ms += wait_ms;
+        }
+
+        return need_send ? RetCode::TIMEOUT : RetCode::SUCCESS;
     }
 
     void hold_all_groups_at_current_position() {
@@ -421,6 +557,83 @@ struct ControlApi::Impl {
                    ? RetCode::SUCCESS
                    : RetCode::TIMEOUT;
     }
+
+    void clear_task_cmd() {
+        for (int arm = 0; arm < command.ArmSize; ++arm)
+            for (int axis = 0; axis < 6; ++axis)
+                command.TaskCmdDeg[arm][axis] = 0.0F;
+    }
+
+    void apply_task_line_profile(uint16_t speed_ratio, float acc_time) {
+        command.motion_type = MotionControl::kTaskLine;
+        command.task_orien_type = OrientControl::kEnd;
+        command.arm_target_mode = PanelTargetMode::kSinglePoint;
+        command.target_type = ControlType::kPosition;
+        command.actuator_mode = ControlType::kPosition;
+        command.reset_control_mem = true;
+        command.interpolation_type = InterpolationMethod::kQuintic;
+        command.interpolation_speed_ratio = clamp_speed_ratio(speed_ratio);
+        command.InterpolationAccTime =
+            acc_time > 0.0F ? acc_time
+                            : config["panel"]["general"]["acc_time"].as<float>();
+        command.InterpolationConstVelTime = 0.0F;
+    }
+
+    bool task_delta_near_zero(const std::vector<int>& arm_indices) const {
+        for (int arm : arm_indices) {
+            for (int axis = 0; axis < 6; ++axis) {
+                const float eps = axis < 3 ? kTaskPosEpsM : kTaskOriEpsRad;
+                if (std::abs(command.TaskCmdDeg[arm][axis]) > eps) return false;
+            }
+        }
+        return true;
+    }
+
+    static bool is_tool_motion_arm(int arm) { return arm == 0 || arm == 2; }
+
+    RetCode send_task_line_command(const std::vector<int>& arm_indices,
+                                   const std::vector<float>& target_tool_pose,
+                                   uint16_t speed_ratio,
+                                   float acc_time) {
+        if (!received_state.load()) return RetCode::RECEIVE_FAILED;
+        if (target_tool_pose.size() !=
+            arm_indices.size() * static_cast<size_t>(kToolPoseSize)) {
+            return RetCode::CONTROLLER_ERROR;
+        }
+
+        const PlannerState snapshot = state_snapshot();
+        clear_task_cmd();
+        apply_task_line_profile(speed_ratio, acc_time);
+
+        size_t source = 0;
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (!is_tool_motion_arm(arm)) continue;
+
+            float current_tool_pose[kToolPoseSize];
+            for (int i = 0; i < kToolPoseSize; ++i)
+                current_tool_pose[i] = snapshot.ToolPose[arm][i];
+
+            float target_pose[kToolPoseSize];
+            const bool user_targets_arm =
+                std::find(arm_indices.begin(), arm_indices.end(), arm) !=
+                arm_indices.end();
+            if (user_targets_arm) {
+                for (int i = 0; i < kToolPoseSize; ++i)
+                    target_pose[i] = target_tool_pose[source++];
+            } else {
+                // Match dual_arm_sdk: stationary arm gets current pose (zero delta).
+                for (int i = 0; i < kToolPoseSize; ++i)
+                    target_pose[i] = current_tool_pose[i];
+            }
+
+            fill_task_line_delta(command.TaskCmdDeg[arm], current_tool_pose,
+                                 target_pose);
+        }
+
+        const std::vector<int> all_tool_arms = {0, 2};
+        if (task_delta_near_zero(all_tool_arms)) return RetCode::SUCCESS;
+        return send_task_with_ack();
+    }
 };
 
 ControlApi::ControlApi(const std::string& config_prefix_path)
@@ -450,6 +663,35 @@ std::tuple<RetCode, std::vector<State>> ControlApi::get_group_state(Group group)
             else
                 result.push_back(snapshot.enabled_joint[arm][joint] ? State::OPERATIONAL : State::SHUTDOWN);
         }
+    }
+    return {RetCode::SUCCESS, result};
+}
+
+RetCode ControlApi::move_line(Group group,
+                              const std::vector<float>& target_tool_pose,
+                              uint16_t speed_ratio, float acc_time) {
+    if (impl_->streaming_active.load()) return RetCode::CONTROLLER_ERROR;
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    const auto arm_indices = impl_->tool_arm_indices(group);
+    if (arm_indices.empty()) return RetCode::CONTROLLER_ERROR;
+    if (target_tool_pose.size() != impl_->expected_tool_pose_count(group))
+        return RetCode::CONTROLLER_ERROR;
+    return impl_->send_task_line_command(arm_indices, target_tool_pose,
+                                         speed_ratio, acc_time);
+}
+
+std::tuple<RetCode, std::vector<float>>
+ControlApi::get_tool_pose(Group group) const {
+    const auto arm_indices = impl_->tool_arm_indices(group);
+    if (arm_indices.empty()) return {RetCode::CONTROLLER_ERROR, {}};
+    if (!impl_->received_state.load()) return {RetCode::RECEIVE_FAILED, {}};
+
+    const PlannerState snapshot = impl_->state_snapshot();
+    std::vector<float> result;
+    result.reserve(impl_->expected_tool_pose_count(group));
+    for (int arm : arm_indices) {
+        for (int i = 0; i < kToolPoseSize; ++i)
+            result.push_back(snapshot.ToolPose[arm][i]);
     }
     return {RetCode::SUCCESS, result};
 }
