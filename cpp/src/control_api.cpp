@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -120,6 +121,17 @@ struct ControlApi::Impl {
     uint8_t streaming_trajectory_mode = 2;
     uint16_t streaming_radio = 999;
     int streaming_hz = 100;
+    float tool_target_cache[MAX_ARM_SIZE][kToolPoseSize]{};
+    bool tool_target_cache_valid = false;
+    std::array<bool, MAX_ARM_SIZE> tool_target_dirty{};
+    std::thread tool_streaming_thread;
+    std::atomic<bool> tool_streaming_active{false};
+    std::condition_variable tool_flush_cv;
+    bool tool_flush_pending = false;
+    int tool_coalesce_ms = 10;
+    uint16_t tool_stream_speed_ratio = 50;
+    float tool_stream_acc_time = 0.0F;
+    bool tool_stream_profile_initialized = false;
     float receive_dt_us_ = 9000.0F;
     MotionControl last_motion_type_ = MotionControl::kJoint;
     ControlType last_target_type_ = ControlType::kPosition;
@@ -142,11 +154,21 @@ struct ControlApi::Impl {
         receive_thread = std::thread(&Impl::receive_loop, this);
     }
 
-    ~Impl() { stop_streaming_loop(); }
+    ~Impl() { stop_all_streaming_loops(); }
 
-    void stop_streaming_loop() {
+    void stop_joint_streaming_loop() {
         streaming_active.store(false);
         if (streaming_thread.joinable()) streaming_thread.join();
+    }
+
+    void stop_tool_streaming_loop() {
+        tool_streaming_active.store(false);
+        if (tool_streaming_thread.joinable()) tool_streaming_thread.join();
+    }
+
+    void stop_all_streaming_loops() {
+        stop_joint_streaming_loop();
+        stop_tool_streaming_loop();
         shutdown.store(true);
         if (receive_thread.joinable()) receive_thread.join();
         if (udp) udp->close();
@@ -591,20 +613,79 @@ struct ControlApi::Impl {
 
     static bool is_tool_motion_arm(int arm) { return arm == 0 || arm == 2; }
 
-    RetCode send_task_line_command(const std::vector<int>& arm_indices,
-                                   const std::vector<float>& target_tool_pose,
-                                   uint16_t speed_ratio,
-                                   float acc_time) {
-        if (!received_state.load()) return RetCode::RECEIVE_FAILED;
-        if (target_tool_pose.size() !=
-            arm_indices.size() * static_cast<size_t>(kToolPoseSize)) {
+    void clear_tool_target_dirty() {
+        for (int arm = 0; arm < MAX_ARM_SIZE; ++arm) tool_target_dirty[arm] = false;
+    }
+
+    void sync_tool_target_cache_from_state() {
+        const PlannerState snapshot = state_snapshot();
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (!is_tool_motion_arm(arm)) continue;
+            for (int i = 0; i < kToolPoseSize; ++i)
+                tool_target_cache[arm][i] = snapshot.ToolPose[arm][i];
+        }
+        tool_target_cache_valid = true;
+        clear_tool_target_dirty();
+    }
+
+    bool ensure_tool_target_cache() {
+        if (tool_target_cache_valid) return true;
+        if (!received_state.load()) return false;
+        sync_tool_target_cache_from_state();
+        return true;
+    }
+
+    void hold_unflushed_tool_targets_in_cache(bool sticky_left_right) {
+        if (!received_state.load()) return;
+        const PlannerState snapshot = state_snapshot();
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (!is_tool_motion_arm(arm)) continue;
+            if (sticky_left_right && is_tool_motion_arm(arm)) continue;
+            if (tool_target_dirty[arm]) continue;
+            for (int i = 0; i < kToolPoseSize; ++i)
+                tool_target_cache[arm][i] = snapshot.ToolPose[arm][i];
+        }
+    }
+
+    RetCode set_tool_line_target_locked(int arm, const std::vector<float>& tool_pose) {
+        if (!is_tool_motion_arm(arm) ||
+            tool_pose.size() != static_cast<size_t>(kToolPoseSize)) {
             return RetCode::CONTROLLER_ERROR;
         }
+        if (!ensure_tool_target_cache()) return RetCode::RECEIVE_FAILED;
+        for (int i = 0; i < kToolPoseSize; ++i)
+            tool_target_cache[arm][i] = tool_pose[static_cast<size_t>(i)];
+        tool_target_dirty[arm] = true;
+        return RetCode::SUCCESS;
+    }
 
+    void hold_joints_at_feedback() {
+        if (!received_state.load()) return;
         const PlannerState snapshot = state_snapshot();
-        clear_task_cmd();
-        apply_task_line_profile(speed_ratio, acc_time);
+        for (int arm = 0; arm < command.ArmSize; ++arm)
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint)
+                command.JointCmd[arm][joint] = snapshot.JointPos[arm][joint];
+    }
 
+    void fill_task_line_deltas_from_tool_cache(const PlannerState& snapshot) {
+        clear_task_cmd();
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (!is_tool_motion_arm(arm)) continue;
+            float current_tool_pose[kToolPoseSize];
+            float target_pose[kToolPoseSize];
+            for (int i = 0; i < kToolPoseSize; ++i) {
+                current_tool_pose[i] = snapshot.ToolPose[arm][i];
+                target_pose[i] = tool_target_cache[arm][i];
+            }
+            fill_task_line_delta(command.TaskCmdDeg[arm], current_tool_pose,
+                                 target_pose);
+        }
+    }
+
+    void fill_task_line_deltas_for_arms(const PlannerState& snapshot,
+                                        const std::vector<int>& arm_indices,
+                                        const std::vector<float>& target_tool_pose) {
+        clear_task_cmd();
         size_t source = 0;
         for (int arm = 0; arm < command.ArmSize; ++arm) {
             if (!is_tool_motion_arm(arm)) continue;
@@ -621,7 +702,6 @@ struct ControlApi::Impl {
                 for (int i = 0; i < kToolPoseSize; ++i)
                     target_pose[i] = target_tool_pose[source++];
             } else {
-                // Match dual_arm_sdk: stationary arm gets current pose (zero delta).
                 for (int i = 0; i < kToolPoseSize; ++i)
                     target_pose[i] = current_tool_pose[i];
             }
@@ -629,9 +709,76 @@ struct ControlApi::Impl {
             fill_task_line_delta(command.TaskCmdDeg[arm], current_tool_pose,
                                  target_pose);
         }
+    }
+
+    RetCode send_cached_tool_line_command(uint16_t speed_ratio, float acc_time,
+                                          bool sticky_left_right) {
+        if (!ensure_tool_target_cache()) return RetCode::RECEIVE_FAILED;
+
+        hold_unflushed_tool_targets_in_cache(sticky_left_right);
+        const PlannerState snapshot = state_snapshot();
+        fill_task_line_deltas_from_tool_cache(snapshot);
+
+        const std::vector<int> all_tool_arms = {0, 2};
+        if (task_delta_near_zero(all_tool_arms)) {
+            clear_tool_target_dirty();
+            return RetCode::SUCCESS;
+        }
+
+        apply_task_line_profile(speed_ratio, acc_time);
+        if (!tool_stream_profile_initialized) {
+            command.reset_control_mem = true;
+            tool_stream_profile_initialized = true;
+        } else {
+            command.reset_control_mem = false;
+        }
+
+        hold_joints_at_feedback();
+        tool_stream_profile_initialized = false;
+        return send_task_with_ack();
+    }
+
+    void request_tool_line_auto_flush_locked() {
+        if (!tool_streaming_active.load()) return;
+        tool_flush_pending = true;
+    }
+
+    void tool_auto_flush_loop() {
+        while (tool_streaming_active.load()) {
+            std::unique_lock<std::mutex> lock(command_mutex);
+            tool_flush_cv.wait(lock, [&] {
+                return tool_flush_pending || !tool_streaming_active.load();
+            });
+            if (!tool_streaming_active.load()) break;
+            if (tool_coalesce_ms > 0) {
+                tool_flush_cv.wait_for(
+                    lock, std::chrono::milliseconds(tool_coalesce_ms));
+            }
+            tool_flush_pending = false;
+            send_cached_tool_line_command(tool_stream_speed_ratio,
+                                          tool_stream_acc_time, true);
+        }
+    }
+
+    RetCode send_task_line_command(const std::vector<int>& arm_indices,
+                                   const std::vector<float>& target_tool_pose,
+                                   uint16_t speed_ratio,
+                                   float acc_time) {
+        if (!received_state.load()) return RetCode::RECEIVE_FAILED;
+        if (target_tool_pose.size() !=
+            arm_indices.size() * static_cast<size_t>(kToolPoseSize)) {
+            return RetCode::CONTROLLER_ERROR;
+        }
+
+        const PlannerState snapshot = state_snapshot();
+        apply_task_line_profile(speed_ratio, acc_time);
+        command.reset_control_mem = true;
+        fill_task_line_deltas_for_arms(snapshot, arm_indices, target_tool_pose);
+        hold_joints_at_feedback();
 
         const std::vector<int> all_tool_arms = {0, 2};
         if (task_delta_near_zero(all_tool_arms)) return RetCode::SUCCESS;
+        tool_stream_profile_initialized = false;
         return send_task_with_ack();
     }
 };
@@ -639,7 +786,10 @@ struct ControlApi::Impl {
 ControlApi::ControlApi(const std::string& config_prefix_path)
     : impl_(std::make_unique<Impl>(config_prefix_path)) {}
 
-ControlApi::~ControlApi() { stop_dual_arm_streaming(); }
+ControlApi::~ControlApi() {
+    stop_dual_arm_tool_line_auto_flush();
+    stop_dual_arm_streaming();
+}
 
 RetCode ControlApi::set_group(Group group, bool enable) {
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
@@ -670,7 +820,8 @@ std::tuple<RetCode, std::vector<State>> ControlApi::get_group_state(Group group)
 RetCode ControlApi::move_line(Group group,
                               const std::vector<float>& target_tool_pose,
                               uint16_t speed_ratio, float acc_time) {
-    if (impl_->streaming_active.load()) return RetCode::CONTROLLER_ERROR;
+    if (impl_->streaming_active.load() || impl_->tool_streaming_active.load())
+        return RetCode::CONTROLLER_ERROR;
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
     const auto arm_indices = impl_->tool_arm_indices(group);
     if (arm_indices.empty()) return RetCode::CONTROLLER_ERROR;
@@ -698,6 +849,7 @@ ControlApi::get_tool_pose(Group group) const {
 
 RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
                                bool follow, uint8_t trajectory_mode, uint16_t radio) {
+    if (impl_->tool_streaming_active.load()) return RetCode::CONTROLLER_ERROR;
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
     const auto indices = impl_->group_indices(group);
     if (indices.empty() || joints.size() != impl_->expected_joint_count(group))
@@ -739,6 +891,7 @@ RetCode ControlApi::set_joint_target(Group group,
 
 RetCode ControlApi::flush_joint_command(bool follow, uint8_t trajectory_mode,
                                         uint16_t radio) {
+    if (impl_->tool_streaming_active.load()) return RetCode::CONTROLLER_ERROR;
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
     return impl_->send_cached_joint_command(follow, trajectory_mode, radio, false);
 }
@@ -766,7 +919,8 @@ RetCode ControlApi::start_dual_arm_streaming(bool follow, uint8_t trajectory_mod
                    (trajectory_mode == 1 && radio > 100) ||
                    (trajectory_mode == 2 && radio > 999)))
         return RetCode::CONTROLLER_ERROR;
-    if (impl_->streaming_active.load()) return RetCode::CONTROLLER_ERROR;
+    if (impl_->streaming_active.load() || impl_->tool_streaming_active.load())
+        return RetCode::CONTROLLER_ERROR;
 
     {
         std::lock_guard<std::mutex> lock(impl_->command_mutex);
@@ -789,12 +943,94 @@ RetCode ControlApi::start_dual_arm_streaming(bool follow, uint8_t trajectory_mod
 }
 
 void ControlApi::stop_dual_arm_streaming() {
-    impl_->streaming_active.store(false);
-    if (impl_->streaming_thread.joinable()) impl_->streaming_thread.join();
+    impl_->stop_joint_streaming_loop();
 }
 
 bool ControlApi::is_dual_arm_streaming() const {
     return impl_->streaming_active.load();
+}
+
+RetCode ControlApi::set_left_tool_line_target(
+    const std::vector<float>& tool_pose) {
+    RetCode ret;
+    {
+        std::lock_guard<std::mutex> lock(impl_->command_mutex);
+        ret = impl_->set_tool_line_target_locked(0, tool_pose);
+        if (ret == RetCode::SUCCESS) impl_->request_tool_line_auto_flush_locked();
+    }
+    if (ret == RetCode::SUCCESS && impl_->tool_streaming_active.load()) {
+        impl_->tool_flush_cv.notify_one();
+    }
+    return ret;
+}
+
+RetCode ControlApi::set_right_tool_line_target(
+    const std::vector<float>& tool_pose) {
+    RetCode ret;
+    {
+        std::lock_guard<std::mutex> lock(impl_->command_mutex);
+        ret = impl_->set_tool_line_target_locked(2, tool_pose);
+        if (ret == RetCode::SUCCESS) impl_->request_tool_line_auto_flush_locked();
+    }
+    if (ret == RetCode::SUCCESS && impl_->tool_streaming_active.load()) {
+        impl_->tool_flush_cv.notify_one();
+    }
+    return ret;
+}
+
+RetCode ControlApi::flush_tool_line_command(uint16_t speed_ratio,
+                                            float acc_time) {
+    if (impl_->tool_streaming_active.load()) return RetCode::CONTROLLER_ERROR;
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    return impl_->send_cached_tool_line_command(speed_ratio, acc_time, false);
+}
+
+void ControlApi::reset_tool_line_target_cache() {
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    impl_->tool_target_cache_valid = false;
+    impl_->tool_stream_profile_initialized = false;
+    impl_->clear_tool_target_dirty();
+}
+
+RetCode ControlApi::start_dual_arm_tool_line_auto_flush(uint16_t speed_ratio,
+                                                        float acc_time,
+                                                        int coalesce_ms) {
+    if (coalesce_ms < 0 || coalesce_ms > 500) return RetCode::CONTROLLER_ERROR;
+    if (impl_->streaming_active.load() || impl_->tool_streaming_active.load())
+        return RetCode::CONTROLLER_ERROR;
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->command_mutex);
+        if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
+
+        impl_->tool_target_cache_valid = false;
+        impl_->tool_stream_profile_initialized = false;
+        impl_->tool_flush_pending = false;
+        impl_->clear_tool_target_dirty();
+        if (!impl_->ensure_tool_target_cache()) return RetCode::RECEIVE_FAILED;
+
+        impl_->tool_stream_speed_ratio = speed_ratio;
+        impl_->tool_stream_acc_time = acc_time;
+        impl_->tool_coalesce_ms = coalesce_ms;
+    }
+
+    impl_->tool_streaming_active.store(true);
+    impl_->tool_streaming_thread =
+        std::thread(&Impl::tool_auto_flush_loop, impl_.get());
+    return RetCode::SUCCESS;
+}
+
+void ControlApi::stop_dual_arm_tool_line_auto_flush() {
+    {
+        std::lock_guard<std::mutex> lock(impl_->command_mutex);
+        impl_->tool_flush_pending = true;
+    }
+    impl_->tool_flush_cv.notify_all();
+    impl_->stop_tool_streaming_loop();
+}
+
+bool ControlApi::is_dual_arm_tool_line_auto_flush() const {
+    return impl_->tool_streaming_active.load();
 }
 
 std::tuple<RetCode, std::vector<float>> ControlApi::get_joint(Group group) const {

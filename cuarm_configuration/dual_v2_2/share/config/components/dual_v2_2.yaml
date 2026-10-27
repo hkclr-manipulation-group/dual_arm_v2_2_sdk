@@ -38,7 +38,7 @@ arm:
         angular_velocity: [20, 20, 20]                  # in deg/s 
     force_control:
       gravity:
-        ratio: [0.1, 0.1, 0.1, 0.2, 0.1, 0.1, 0.1]
+        ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
         kd: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
       joint_impedance: #Activate when torque control reach joint limit
         kp: [50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0]
@@ -131,14 +131,14 @@ arm:
       joint_jump:
         position: [100, 100, 100, 150, 150, 150, 150]
         velocity: [100, 100, 100, 150, 150, 150, 150]
-        torque:   [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        torque:   [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0]
       task_motion_limit:
         linear_velocity:  [0.2, 0.2, 0.2]
         angular_velocity: [20, 20, 20]
     force_control:
       gravity:
-        ratio: [0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1]
-        kd: [0.1, 0.1, 0.1, 0.0, 0.1, 0.1, 0.1]
+        ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
+        kd: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
       joint_impedance:
         kp: [50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0]
         kd: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]

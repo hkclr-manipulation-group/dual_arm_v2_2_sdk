@@ -41,6 +41,7 @@ set(_dual_arm_cpp_examples
     test_dual_gripper_api
     test_arm_gripper_safe
     test_dual_arm_100hz_follow
+    dual_arm_independent_move_line
     staggered_dual_arm_stream
 )
 

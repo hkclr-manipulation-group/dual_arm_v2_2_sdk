@@ -79,6 +79,23 @@ public:
     void stop_dual_arm_streaming();
     bool is_dual_arm_streaming() const;
 
+    // Independent dual-arm MoveL (ToolPose, kTaskLine). Layout per arm:
+    // x,y,z (m), qw,qx,qy,qz — same as get_tool_pose() / move_line.
+    //
+    // Low-follow coalesced: set_left/right_tool_line_target(), then
+    // start_dual_arm_tool_line_auto_flush(). One UDP packet merges L+R TaskCmd;
+    // send_task_with_ack (blocking). Unupdated arm keeps last cache (sticky).
+    // Or set targets and call flush_tool_line_command() once (no background thread).
+    RetCode set_left_tool_line_target(const std::vector<float>& tool_pose);
+    RetCode set_right_tool_line_target(const std::vector<float>& tool_pose);
+    RetCode flush_tool_line_command(uint16_t speed_ratio = 50, float acc_time = 0.0f);
+    void reset_tool_line_target_cache();
+    RetCode start_dual_arm_tool_line_auto_flush(uint16_t speed_ratio = 50,
+                                                float acc_time = 0.0f,
+                                                int coalesce_ms = 10);
+    void stop_dual_arm_tool_line_auto_flush();
+    bool is_dual_arm_tool_line_auto_flush() const;
+
     std::tuple<RetCode, std::vector<float>> get_joint(Group group) const;
     std::tuple<RetCode, std::vector<float>> get_joint_velocity(Group group) const;
 

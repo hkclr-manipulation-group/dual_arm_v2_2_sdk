@@ -83,7 +83,7 @@ C 对应：`dual_arm_ret_code_t`（`DUAL_ARM_RET_*`）。
 
 ```cpp
 explicit ControlApi(const std::string& config_prefix_path);
-~ControlApi();  // 自动 stop_dual_arm_streaming()
+~ControlApi();  // 自动 stop_dual_arm_streaming()、stop_dual_arm_tool_line_auto_flush()
 ```
 
 ### C
@@ -182,7 +182,7 @@ std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
 - 从 `PlannerState::ToolPose` 读当前位姿，计算相对增量写入 `TaskCmdDeg`
 - 未参与运动的 arm：`TaskCmdDeg = 0`（保持不动）
 - `motion_type = kTaskLine`，阻塞等待 ACK
-- **dual-arm streaming 激活时**返回 `CONTROLLER_ERROR`
+- **关节 streaming 或 Tool MoveL auto flush 激活时**返回 `CONTROLLER_ERROR`
 
 C：
 
@@ -190,6 +190,141 @@ C：
 - `dual_arm_get_tool_pose(api, group, out_pose, capacity, &count)`
 
 示例：`examples/cpp/test_move_line.cpp`、`examples/c/test_move_line.c`。
+
+---
+
+## 5.2 独立双臂 MoveL：缓存 + 合包（低跟随）
+
+与第 5.1 节 `move_line` 相同底层模式（`kTaskLine`、阻塞 ACK、quintic），但目标按**左/右分别写入 SDK 缓存**，再合并为**一个 UDP 包**里的左右 `TaskCmd`。适用于「不想一次构造 `ALL` 的 14 维向量、又希望左右在同一时刻各走一条直线」的场景。
+
+**位姿格式**（与 `get_tool_pose` / `move_line` 一致，每臂 7 个数）：
+
+```text
+x, y, z (m), qw, qx, qy, qz
+```
+
+**使用前建议**：
+
+- 使能 `LEFT_ARM`、`RIGHT_ARM`；MoveL 执行期间建议 **`set_group(HEAD, false)`**（与 `test_move_line` 一致）。
+- `acc_time` 建议显式传入（如 `3.0f`）；传 `0` 会使用 `config.yaml` 里 `panel.general.acc_time`（可能偏大）。
+- 与 **关节** `start_dual_arm_streaming` **互斥**：一方激活时，另一方 `start_*` 返回 `CONTROLLER_ERROR`。
+
+两种用法二选一：**手动 flush**（无后台线程）或 **auto flush**（后台 coalesce + 阻塞下发）。
+
+### 5.2.1 `set_left_tool_line_target` / `set_right_tool_line_target`
+
+```cpp
+RetCode set_left_tool_line_target(const std::vector<float>& tool_pose);   // 7 floats
+RetCode set_right_tool_line_target(const std::vector<float>& tool_pose);  // 7 floats
+```
+
+| 项 | 说明 |
+|----|------|
+| 作用 | 仅更新 SDK 内 **Tool 目标 cache**（arm 0 / arm 2），**不发送** UDP |
+| 长度 | 必须为 7；否则 `CONTROLLER_ERROR` |
+| 未收到状态 | `RECEIVE_FAILED` |
+
+在 **auto flush 已启动** 时，每次 set 成功会唤醒后台线程；在 `coalesce_ms` 窗口内连续 set 左、右，通常会被 **合并为一次** MoveL。
+
+C：`dual_arm_set_left_tool_line_target` / `dual_arm_set_right_tool_line_target`（`tool_pose` 指针 + `pose_count==7`）。
+
+### 5.2.2 `flush_tool_line_command`（手动合包，无后台线程）
+
+```cpp
+RetCode flush_tool_line_command(uint16_t speed_ratio = 50, float acc_time = 0.0f);
+```
+
+| 项 | 说明 |
+|----|------|
+| 作用 | 用当前 cache 计算左右 Task 增量，发 **一包** MoveL，**阻塞**等待 ACK |
+| 前提 | **未**调用 `start_dual_arm_tool_line_auto_flush`；若 auto flush 在跑，返回 `CONTROLLER_ERROR` |
+| 未 dirty 的臂 | **反馈 hold**（用当前 `ToolPose` 作目标，增量≈0，该臂不动） |
+
+典型顺序：
+
+```cpp
+api.set_left_tool_line_target(left_pose);
+api.set_right_tool_line_target(right_pose);
+api.flush_tool_line_command(25, 3.0f);
+```
+
+等价于一次 `move_line(Group::ALL, 左7+右7, …)` 的合包效果，但目标可在两次 set 之间分别计算。
+
+### 5.2.3 `reset_tool_line_target_cache`
+
+```cpp
+void reset_tool_line_target_cache();
+```
+
+清空 Tool cache 有效标志与 dirty 标记；下次 set / flush / start auto flush 前会从 **当前反馈** 重新初始化 cache。手动 flush 流程中若需丢弃旧目标，可先 reset 再 set。
+
+C：`dual_arm_reset_tool_line_target_cache`。
+
+### 5.2.4 `start_dual_arm_tool_line_auto_flush`
+
+```cpp
+RetCode start_dual_arm_tool_line_auto_flush(uint16_t speed_ratio = 50,
+                                            float acc_time = 0.0f,
+                                            int coalesce_ms = 10);
+```
+
+| 参数 | 说明 |
+|------|------|
+| `speed_ratio` | 0..100，同 `move_line` |
+| `acc_time` | 加速时间（s）；0 → config 默认 |
+| `coalesce_ms` | 0..500；收到 set 通知后额外等待，便于连续 `set_left` + `set_right` 合成 **一发**；默认 10 ms |
+
+**行为**：
+
+- 启动后台线程；之后每次 `set_left/right_tool_line_target` 触发 coalesce，再调用 `send_task_with_ack`（**低跟随、阻塞**直到该段 MoveL 完成）。
+- 本周期 **未 set 的左/右臂**：**sticky**——保持 cache 中上次目标（与关节 streaming 类似，而非 flush 的 feedback hold）。
+- 首次启动会从反馈同步 cache；与关节 streaming 或重复 start 互斥时返回 `CONTROLLER_ERROR`。
+
+C：`dual_arm_start_dual_arm_tool_line_auto_flush(api, speed_ratio, acc_time, coalesce_ms)`。
+
+### 5.2.5 `stop_dual_arm_tool_line_auto_flush` / `is_dual_arm_tool_line_auto_flush`
+
+```cpp
+void stop_dual_arm_tool_line_auto_flush();
+bool is_dual_arm_tool_line_auto_flush() const;
+```
+
+停止后台线程；析构 `ControlApi` 时自动调用。`is_dual_arm_tool_line_auto_flush()` 为 `true` 表示 auto flush 线程在运行。
+
+C：`dual_arm_stop_dual_arm_tool_line_auto_flush`、`dual_arm_is_dual_arm_tool_line_auto_flush`（返回 0/1）。
+
+### 5.2.6 典型用法（auto flush，推荐）
+
+与 `examples/cpp/dual_arm_independent_move_line.cpp` 一致：
+
+```cpp
+// 1. 使能 L/R，关 HEAD，可选 set_joint_max_speed
+api.start_dual_arm_tool_line_auto_flush(25, 3.0f, 15);
+
+// 2. 去程：连续 set，SDK 合并为一包 MoveL（阻塞直到 ack 完成）
+api.set_left_tool_line_target(left_target);
+api.set_right_tool_line_target(right_target);
+// 应用层可用 get_tool_pose 轮询到位，或等待下一段 set 前上一段已在 auto flush 内阻塞完成
+
+// 3. 回程：再 set 一次
+api.set_left_tool_line_target(left_start);
+api.set_right_tool_line_target(right_start);
+
+api.stop_dual_arm_tool_line_auto_flush();
+```
+
+**注意**：auto flush 在 `send_task_with_ack` 期间会占住 SDK 下发路径；下一段 set 会在上一段 ACK 完成后才被处理（coalesce 只合并**同一次触发窗口**内的左右 set，不排队多段运动）。
+
+### 5.2.7 与 `move_line` / 关节 API 对比
+
+| 方式 | 如何指定左右目标 | 发包 | 未更新臂 |
+|------|------------------|------|----------|
+| `move_line(ALL, 14)` | 一次向量 | 1 包，阻塞 ACK | 头/非目标臂 Task=0 |
+| `set_*` + `flush_tool_line_command` | 分两次 set | 1 包，阻塞 ACK | **反馈 hold** |
+| `set_*` + **auto flush** | 分两次 set（可异步写目标） | coalesce 后 1 包，阻塞 ACK | **sticky** 上次 cache |
+| `move_line(LEFT/RIGHT, 7)` | 单臂 | 1 包，只动一臂 | 另一臂 Task=0 |
+
+**互斥**：auto flush 激活时不可用 `move_line`、`move_joint`、`flush_joint_command`、`flush_tool_line_command`（返回 `CONTROLLER_ERROR`）。
 
 ---
 
@@ -419,6 +554,8 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 高跟随单臂循环            → move_joint(follow=true, ...) 每 ≤10ms
 双臂同步 100Hz 单线程     → set_joint_target(L/R) + flush_joint_command
 双臂异步独立更新          → start_dual_arm_streaming + set_left/right_joint_target
+笛卡尔 MoveL 一次写 14 维 → move_line(ALL, ...)
+笛卡尔 左右分别设目标     → set_left/right_tool_line_target + auto flush（或 flush_tool_line_command）
 ```
 
 | 模式 | 发包 | 未更新臂行为 | 用户周期要求 |
@@ -426,6 +563,8 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 | `move_joint` 单组 | 立即 1 包 | 其他组 feedback hold | 高跟随 ≤10 ms |
 | `both-flush` | 用户 flush 1 包 | 未 dirty 臂 feedback hold | 高跟随 ≤10 ms |
 | `both-stream` | SDK `@hz` | 左/右 sticky 上次目标 | 仅更新目标，无 flush |
+| Tool `flush_tool_line` | 用户 flush 1 包 | 未 dirty 臂 feedback hold | 低跟随，阻塞 ACK |
+| Tool `auto flush` | set 触发，coalesce 1 包 | 左/右 sticky cache | 低跟随，段间阻塞 ACK |
 
 ---
 
@@ -436,6 +575,12 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 | `ControlApi(path)` | `dual_arm_control_api_create(path)` |
 | `set_group` | `dual_arm_set_group` |
 | `move_joint` | `dual_arm_move_joint` |
+| `move_line` / `get_tool_pose` | `dual_arm_move_line` / `dual_arm_get_tool_pose` |
+| `set_left/right_tool_line_target` | `dual_arm_set_left/right_tool_line_target` |
+| `flush_tool_line_command` | `dual_arm_flush_tool_line_command` |
+| `reset_tool_line_target_cache` | `dual_arm_reset_tool_line_target_cache` |
+| `start/stop_dual_arm_tool_line_auto_flush` | `dual_arm_start/stop_dual_arm_tool_line_auto_flush` |
+| `is_dual_arm_tool_line_auto_flush` | `dual_arm_is_dual_arm_tool_line_auto_flush` |
 | `set_joint_target` | `dual_arm_set_joint_target` |
 | `flush_joint_command` | `dual_arm_flush_joint_command` |
 | `set_left_joint_target` | `dual_arm_set_left_joint_target` |
@@ -455,6 +600,8 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 |------|------|----------|
 | 合并双臂发包 | 无 | `set_joint_target` + `flush_joint_command` |
 | 独立双臂 streaming | 无 | `set_left/right_joint_target` + `start/stop_dual_arm_streaming` |
+| 独立双臂 MoveL 合包 | 无 | `set_left/right_tool_line_target` + `flush_tool_line_command` / `start_dual_arm_tool_line_auto_flush` |
+| 笛卡尔 MoveL | 草案未单列 | `move_line` + `get_tool_pose` |
 | 关节速度 | 无 | `get_joint_velocity` |
 | 夹爪量纲 | 范围 `???` | 0..1000 及物理映射已定义 |
 | `set_joint_max_acc` | 与 max_speed 类似 | **仅本地缓存，未下发** |

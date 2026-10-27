@@ -364,6 +364,105 @@ extern "C" int dual_arm_is_dual_arm_streaming(dual_arm_control_api_t* api) {
     }
 }
 
+static dual_arm_ret_code_t set_tool_line_target_c(
+    dual_arm_control_api_t* api, const float* tool_pose, size_t pose_count,
+    dual_arm_v2_2_sdk::RetCode (dual_arm_v2_2_sdk::ControlApi::*setter)(
+        const std::vector<float>&)) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    if (tool_pose == nullptr || pose_count != 7) {
+        set_last_error("tool_pose must contain exactly 7 floats");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        const std::vector<float> values(tool_pose, tool_pose + pose_count);
+        return to_c_ret((api->cpp->*setter)(values));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_set_left_tool_line_target(
+    dual_arm_control_api_t* api, const float* tool_pose, size_t pose_count) {
+    return set_tool_line_target_c(
+        api, tool_pose, pose_count,
+        &dual_arm_v2_2_sdk::ControlApi::set_left_tool_line_target);
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_set_right_tool_line_target(
+    dual_arm_control_api_t* api, const float* tool_pose, size_t pose_count) {
+    return set_tool_line_target_c(
+        api, tool_pose, pose_count,
+        &dual_arm_v2_2_sdk::ControlApi::set_right_tool_line_target);
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_flush_tool_line_command(
+    dual_arm_control_api_t* api, uint16_t speed_ratio, float acc_time) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        return to_c_ret(api->cpp->flush_tool_line_command(speed_ratio, acc_time));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" void dual_arm_reset_tool_line_target_cache(
+    dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        return;
+    }
+    try {
+        api->cpp->reset_tool_line_target_cache();
+    } catch (...) {
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_start_dual_arm_tool_line_auto_flush(
+    dual_arm_control_api_t* api, uint16_t speed_ratio, float acc_time,
+    int coalesce_ms) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        return to_c_ret(api->cpp->start_dual_arm_tool_line_auto_flush(
+            speed_ratio, acc_time, coalesce_ms));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" void dual_arm_stop_dual_arm_tool_line_auto_flush(
+    dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        return;
+    }
+    try {
+        api->cpp->stop_dual_arm_tool_line_auto_flush();
+    } catch (...) {
+    }
+}
+
+extern "C" int dual_arm_is_dual_arm_tool_line_auto_flush(
+    dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        return 0;
+    }
+    try {
+        return api->cpp->is_dual_arm_tool_line_auto_flush() ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 extern "C" dual_arm_ret_code_t dual_arm_get_joint(dual_arm_control_api_t* api,
                                                   dual_arm_group_t group,
                                                   float* out_joints,
