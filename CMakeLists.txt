@@ -27,7 +27,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 add_subdirectory(cpp)
 add_subdirectory(c)
 
-set(_dual_arm_cpp_examples
+# C 与 C++ 均有源码的示例
+set(_dual_arm_shared_examples
     go_home
     move_arms_demo
     test_move_line
@@ -41,8 +42,13 @@ set(_dual_arm_cpp_examples
     test_dual_gripper_api
     test_arm_gripper_safe
     test_dual_arm_100hz_follow
-    dual_arm_independent_move_line
     staggered_dual_arm_stream
+)
+
+# 仅 examples/cpp/ 下有 .cpp，无对应 .c
+set(_dual_arm_cpp_only_examples
+    dual_arm_independent_move_line
+    test_dual_arm_sequential_move_line
 )
 
 option(DUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES "Build C++ SDK example programs" ON)
@@ -59,7 +65,8 @@ if(DUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES)
         target_link_libraries(${target}_cpp PRIVATE dual_arm_v2_2_control_sdk)
     endfunction()
 
-    foreach(_dual_arm_example ${_dual_arm_cpp_examples})
+    foreach(_dual_arm_example ${_dual_arm_shared_examples}
+                              ${_dual_arm_cpp_only_examples})
         add_sdk_cpp_example(${_dual_arm_example})
     endforeach()
 
@@ -82,15 +89,18 @@ if(DUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES)
             dual_arm_v2_2_control_sdk_c Threads::Threads m)
     endfunction()
 
-    foreach(_dual_arm_example ${_dual_arm_cpp_examples})
+    foreach(_dual_arm_example ${_dual_arm_shared_examples})
         add_sdk_c_example(${_dual_arm_example})
     endforeach()
-    foreach(_dual_arm_example ${_dual_arm_c_only_examples})
-        add_sdk_c_example(${_dual_arm_example})
-    endforeach()
+    if(DEFINED _dual_arm_c_only_examples)
+        foreach(_dual_arm_example ${_dual_arm_c_only_examples})
+            add_sdk_c_example(${_dual_arm_example})
+        endforeach()
+    endif()
 
     unset(_dual_arm_c_example_dir)
 endif()
 
-unset(_dual_arm_cpp_examples)
+unset(_dual_arm_shared_examples)
+unset(_dual_arm_cpp_only_examples)
 unset(_dual_arm_c_only_examples)

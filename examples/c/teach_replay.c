@@ -6,6 +6,7 @@
  *   1. 等待 rt_control 状态
  *   2. 启用双臂
  *   3. 从文件加载示教点并循环回放（低跟随 move_joint）
+ *   4. 每点 move_joint 后等待到点；超时则重发同一点（有限次数），仍失败则中止回放。
  *
  * 示教文件格式（逗号分隔，单位：度）：
  *   idx, left_j1..j7, [left_gripper,] right_j1..j7, [right_gripper]
@@ -28,7 +29,10 @@
 static const float kMaxSpeedDegS = 50.0F;
 static const float kPositionToleranceDeg = 0.5F;
 static const int kReachTimeoutSeconds = 10;
+static const int kMaxReachAttempts = 3;
 static const float kDwellSeconds = 1.0F;
+static const int kReachPollIntervalMs = 200;
+static const int kReachSettleReads = 3;
 
 static volatile sig_atomic_t g_stop_requested = 0;
 
@@ -150,9 +154,16 @@ static int wait_for_reach(dual_arm_control_api_t* api,
     int elapsed_ms = 0;
     int stable = 0;
     float last_error = 0.0F;
+    float last_left_error = 0.0F;
+    float last_right_error = 0.0F;
     int progress_ms = 0;
 
     while (elapsed_ms <= timeout_seconds * 1000) {
+        if (g_stop_requested) {
+            printf("    wait_for_reach interrupted (Ctrl+C)\n");
+            return 0;
+        }
+
         float left_current[kMaxJoints];
         float right_current[kMaxJoints];
         size_t left_current_count = 0;
@@ -174,10 +185,14 @@ static int wait_for_reach(dual_arm_control_api_t* api,
             continue;
         }
 
-        float max_error = max_joint_error(left_target, left_current, left_count);
-        max_error = float_max(
-            max_error, max_joint_error(right_target, right_current, right_count));
+        const float left_max =
+            max_joint_error(left_target, left_current, left_count);
+        const float right_max =
+            max_joint_error(right_target, right_current, right_count);
+        const float max_error = float_max(left_max, right_max);
         last_error = max_error;
+        last_left_error = left_max;
+        last_right_error = right_max;
 
         if (max_error <= tolerance_rad) {
             if (++stable >= settle_reads) {
@@ -201,8 +216,9 @@ static int wait_for_reach(dual_arm_control_api_t* api,
         elapsed_ms += poll_interval_ms;
     }
 
-    printf("    WARNING: timed out after %d s (last max joint err %.3f deg)\n",
-           timeout_seconds, last_error * kRadToDeg);
+    printf("    WARNING: timed out after %d s (max err L/R/all: %.3f/%.3f/%.3f deg)\n",
+           timeout_seconds, last_left_error * kRadToDeg,
+           last_right_error * kRadToDeg, last_error * kRadToDeg);
     return 0;
 }
 
@@ -224,6 +240,36 @@ static int move_both_arms(dual_arm_control_api_t* api,
         return 0;
     }
     return 1;
+}
+
+static int move_point_until_reached(dual_arm_control_api_t* api,
+                                    const float* left_target, size_t left_count,
+                                    const float* right_target, size_t right_count,
+                                    const float* head_hold, size_t head_count,
+                                    float tolerance_rad) {
+    for (int attempt = 1; attempt <= kMaxReachAttempts; ++attempt) {
+        if (attempt > 1) {
+            printf("    retry move_joint, attempt %d/%d\n", attempt,
+                   kMaxReachAttempts);
+        }
+        if (!move_both_arms(api, left_target, left_count, right_target,
+                            right_count, head_hold, head_count)) {
+            return 0;
+        }
+        if (wait_for_reach(api, left_target, left_count, right_target,
+                           right_count, tolerance_rad, kReachPollIntervalMs,
+                           kReachTimeoutSeconds, kReachSettleReads)) {
+            return 1;
+        }
+        if (g_stop_requested) {
+            return 0;
+        }
+    }
+    fprintf(stderr,
+            "    ERROR: point not reached after %d move/wait attempt(s). "
+            "Aborting replay (next point will NOT be sent).\n",
+            kMaxReachAttempts);
+    return 0;
 }
 
 static int configure_arm_speed(dual_arm_control_api_t* api,
@@ -332,14 +378,16 @@ int main(int argc, char* argv[]) {
             print_joints_deg("    left_j", point->left_rad, 7);
             print_joints_deg("    right_j", point->right_rad, 7);
 
-            if (!move_both_arms(api, point->left_rad, 7, point->right_rad, 7,
-                                head_current, head_count)) {
+            if (!move_point_until_reached(api, point->left_rad, 7,
+                                          point->right_rad, 7, head_current,
+                                          head_count, tolerance_rad)) {
                 free(points);
                 dual_arm_control_api_destroy(api);
+                if (g_stop_requested) {
+                    return 0;
+                }
                 return 1;
             }
-            wait_for_reach(api, point->left_rad, 7, point->right_rad, 7,
-                           tolerance_rad, 200, kReachTimeoutSeconds, 3);
 
             if (g_stop_requested) {
                 break;

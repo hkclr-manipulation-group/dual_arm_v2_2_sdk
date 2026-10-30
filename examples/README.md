@@ -46,9 +46,10 @@ cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF
 | 夹爪 | `test_gripper_api` | 同左 | 左夹爪 API |
 | 100Hz 跟随 | `test_dual_arm_100hz_follow` | 同左 | 高跟随模式对比 |
 | 低跟随独立 MoveL | `dual_arm_independent_move_line` | — | `set_*_tool_line_target` + `start_dual_arm_tool_line_auto_flush`（合包 ack，非 ALL/14） |
+| 顺序双臂 MoveL | `test_dual_arm_sequential_move_line` | — | 左 out/back → 右 out/back，每臂 `move_line`（旧独立测试行为） |
 | 错峰双臂流式 | — | `staggered_dual_arm_stream` | 左先动→右再动→左先回零→右再回零 |
 
-完整列表见根目录 `CMakeLists.txt` 中的 `_dual_arm_cpp_examples`。
+完整列表见根目录 `CMakeLists.txt` 中的 `_dual_arm_shared_examples` 与 `_dual_arm_cpp_only_examples`。
 
 ---
 

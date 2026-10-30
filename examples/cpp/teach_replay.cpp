@@ -6,6 +6,8 @@
  *   1. 等待 rt_control 状态
  *   2. 启用双臂
  *   3. 从文件加载示教点并循环回放（低跟随 move_joint）
+ *   4. 每点 move_joint 后等待到点；超时则重发同一点（有限次数），仍失败则中止回放，
+ *      避免未到点就发送下一点导致目标突变与速度/力矩尖峰。
  *
  * 示教文件格式（逗号分隔，单位：度）：
  *   idx, left_j1..j7, [left_gripper,] right_j1..j7, [right_gripper]
@@ -48,7 +50,10 @@ namespace {
 constexpr float kMaxSpeedDegS = 50.0F;
 constexpr float kPositionToleranceDeg = 0.5F;
 constexpr int kReachTimeoutSeconds = 10;
+constexpr int kMaxReachAttempts = 3;
 constexpr float kDwellSeconds = 1.0F;
+constexpr float kReachPollIntervalS = 0.2F;
+constexpr int kReachSettleReads = 3;
 
 std::atomic<bool> g_stop_requested{false};
 
@@ -138,8 +143,15 @@ bool wait_for_reach(ControlApi& api,
     int stable = 0;
     auto last_progress = std::chrono::steady_clock::now();
     float last_error = 0.0F;
+    float last_left_error = 0.0F;
+    float last_right_error = 0.0F;
 
     while (std::chrono::steady_clock::now() <= deadline) {
+        if (g_stop_requested.load()) {
+            std::cout << "    wait_for_reach interrupted (Ctrl+C)\n";
+            return false;
+        }
+
         auto [left_code, left_current] = api.get_joint(Group::LEFT_ARM);
         auto [right_code, right_current] = api.get_joint(Group::RIGHT_ARM);
         if (left_code != RetCode::SUCCESS || right_code != RetCode::SUCCESS ||
@@ -150,13 +162,18 @@ bool wait_for_reach(ControlApi& api,
         }
 
         float max_error = 0.0F;
+        float left_max = 0.0F;
+        float right_max = 0.0F;
         for (std::size_t i = 0; i < left_target.size(); ++i)
-            max_error = std::max(max_error,
-                                 std::abs(left_current[i] - left_target[i]));
+            left_max = std::max(left_max,
+                                std::abs(left_current[i] - left_target[i]));
         for (std::size_t i = 0; i < right_target.size(); ++i)
-            max_error = std::max(max_error,
+            right_max = std::max(right_max,
                                  std::abs(right_current[i] - right_target[i]));
+        max_error = std::max(left_max, right_max);
         last_error = max_error;
+        last_left_error = left_max;
+        last_right_error = right_max;
 
         if (max_error <= tolerance_rad) {
             if (++stable >= settle_reads) {
@@ -182,7 +199,8 @@ bool wait_for_reach(ControlApi& api,
     }
 
     std::cout << "    WARNING: timed out after " << timeout_seconds
-              << "s (last max joint err " << last_error * kRadToDeg
+              << "s (max err L/R/all: " << last_left_error * kRadToDeg << "/"
+              << last_right_error * kRadToDeg << "/" << last_error * kRadToDeg
               << " deg)\n";
     return false;
 }
@@ -202,6 +220,34 @@ bool move_both_arms(ControlApi& api, const std::vector<float>& left_target,
         return false;
     }
     return true;
+}
+
+bool move_point_until_reached(ControlApi& api,
+                              const std::vector<float>& left_target,
+                              const std::vector<float>& right_target,
+                              const std::vector<float>& head_hold,
+                              float tolerance_rad) {
+    for (int attempt = 1; attempt <= kMaxReachAttempts; ++attempt) {
+        if (attempt > 1) {
+            std::cout << "    retry move_joint, attempt " << attempt << "/"
+                      << kMaxReachAttempts << '\n';
+        }
+        if (!move_both_arms(api, left_target, right_target, head_hold)) {
+            return false;
+        }
+        if (wait_for_reach(api, left_target, right_target, tolerance_rad,
+                           kReachPollIntervalS, kReachTimeoutSeconds,
+                           kReachSettleReads)) {
+            return true;
+        }
+        if (g_stop_requested.load()) {
+            return false;
+        }
+    }
+    std::cerr << "    ERROR: point not reached after " << kMaxReachAttempts
+              << " move/wait attempt(s). Aborting replay (next point will "
+                 "NOT be sent).\n";
+    return false;
 }
 
 bool configure_arm_speed(ControlApi& api, Group group, std::size_t joint_count) {
@@ -277,11 +323,14 @@ int main(int argc, char* argv[]) {
                 print_joints_deg("    left_j", point.left_rad);
                 print_joints_deg("    right_j", point.right_rad);
 
-                if (!move_both_arms(api, point.left_rad, point.right_rad,
-                                    head_current))
+                if (!move_point_until_reached(api, point.left_rad,
+                                              point.right_rad, head_current,
+                                              tolerance_rad)) {
+                    if (g_stop_requested.load()) {
+                        break;
+                    }
                     return 1;
-                wait_for_reach(api, point.left_rad, point.right_rad,
-                               tolerance_rad, 0.2F, kReachTimeoutSeconds, 3);
+                }
 
                 if (g_stop_requested.load()) break;
 
