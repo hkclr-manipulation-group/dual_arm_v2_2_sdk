@@ -554,6 +554,7 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 高跟随单臂循环            → move_joint(follow=true, ...) 每 ≤10ms
 双臂同步 100Hz 单线程     → set_joint_target(L/R) + flush_joint_command
 双臂异步独立更新          → start_dual_arm_streaming + set_left/right_joint_target
+一臂 Joint + 一臂 Tool 直线（SDK IK）→ AsyncDualArmController
 笛卡尔 MoveL 一次写 14 维 → move_line(ALL, ...)
 笛卡尔 左右分别设目标     → set_left/right_tool_line_target + auto flush（或 flush_tool_line_command）
 ```
@@ -600,9 +601,57 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 |------|------|----------|
 | 合并双臂发包 | 无 | `set_joint_target` + `flush_joint_command` |
 | 独立双臂 streaming | 无 | `set_left/right_joint_target` + `start/stop_dual_arm_streaming` |
-| 独立双臂 MoveL 合包 | 无 | `set_left/right_tool_line_target` + `flush_tool_line_command` / `start_dual_arm_tool_line_auto_flush` |
+| 独立双臂 MoveL 合包 | 无 | `set_left/right_tool_line_target` + `flush_tool_line_command` / `start_dual_arm_tool_line_auto_flush` |  
 | 笛卡尔 MoveL | 草案未单列 | `move_line` + `get_tool_pose` |
 | 关节速度 | 无 | `get_joint_velocity` |
 | 夹爪量纲 | 范围 `???` | 0..1000 及物理映射已定义 |
 | `set_joint_max_acc` | 与 max_speed 类似 | **仅本地缓存，未下发** |
 | `State::ERROR` | 草案省略 | 已实现 |
+| SDK 内 Tool IK + 异步 Joint/Cartesian | 无 | `Kinematics` + `AsyncDualArmController`（需 `DUAL_ARM_V2_2_SDK_ENABLE_KINEMATICS=ON`） |
+
+---
+
+## 14. SDK 内运动学（Kinematics）与异步 Joint + Cartesian
+
+**头文件**：[`kinematics.h`](../cpp/include/kinematics.h)、[`kinematics_types.h`](../cpp/include/kinematics_types.h)、[`async_dual_arm_controller.h`](../cpp/include/async_dual_arm_controller.h)
+
+**依赖**：与 `rt_control` 同源 `cuarm_robotics`（Pinocchio）+ 同目录 `config.yaml` / URDF / `offset_from_ee`。
+
+**构建**：
+
+```bash
+cmake -S dual_arm_v2_2_sdk_rev -B dual_arm_v2_2_sdk_rev/build \
+  -DDUAL_ARM_V2_2_SDK_ENABLE_KINEMATICS=ON
+cmake --build dual_arm_v2_2_sdk_rev/build --target dual_arm_async_joint_cartesian
+```
+
+### 14.1 `Kinematics`
+
+- `Kinematics(config_prefix, arm_index)`：`arm_index` 0=左、2=右（7 轴）。
+- `forward_tool(q_rad)` / `inverse_tool(ToolPose7, seed, out, SingularityPolicy)`：Tool 系 FK/IK（关节 **rad**）。
+- `sigma_min(q)`：6×7 雅可比最小奇异值，用于近奇异拒绝。
+- `MotionRetCode`：`IK_FAILED`、`IK_NEAR_SINGULAR`、`PATH_BLOCKED` 等。
+
+### 14.2 `AsyncDualArmController`
+
+与 §6 `ControlApi::set_joint_target`（无插值、需自行 flush）**不同**；本节 `set_joint_target` 为 **AsyncDualArmController 成员**，必带 `duration_s`。
+
+```cpp
+MotionRetCode set_joint_target(CartesianSide joint_side,
+                               const Joint7Rad& target_rad,
+                               float duration_s);
+```
+
+- `start(AsyncStreamOptions)`：内部 `start_dual_arm_streaming(follow=true, trajectory_mode=0)`（**kDirect 低跟随**）+ 规划线程。
+- **Joint 臂**（与 `cartesian_arm` 相反侧）：`set_joint_target(joint_side, target_rad, duration_s)` — 从当前反馈起 **smooth-step 插值** 到目标（`duration_s > 0`），经 kDirect 小步 setpoint 下发；不阻塞 Task 臂。`hold_joint_arm` 取消插值并保持当前反馈。
+- `joint_move_progress(joint_side)`：当前 Joint 运动进度 \(u\in[0,1]\)（无进行中的运动时返回 1）。
+- **Cartesian 臂**：`move_tool_line(ToolLineSpec)` — Tool 直线（位置线性 + 四元数 slerp），SDK 离散 IK 后 `set_left/right_joint_target`。
+- `poll_reach`：相对 `task_goal` 的 Tool 3D / 姿态误差（默认 0.5 mm 可配）。
+- `SingularityPolicy`：`sigma_min_threshold`、`reject_entire_line`（整段预扫）、`max_delta_q_rad` 等。
+
+### 14.3 示例
+
+[`examples/cpp/dual_arm_async_joint_cartesian.cpp`](../examples/cpp/dual_arm_async_joint_cartesian.cpp)：
+
+- 默认 **右 Tool 直线、左 MoveJ**；`--cartesian left` 可互换。
+- 与 `dual_arm_independent_move_line`（双臂 TaskLine + rt_control IK）对比：本路径 **双臂最终均发 joint**，Task 臂 IK 在 **SDK 进程** 完成。

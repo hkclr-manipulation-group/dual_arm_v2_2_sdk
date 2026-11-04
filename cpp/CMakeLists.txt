@@ -17,15 +17,31 @@ find_package(yaml-cpp REQUIRED)
 
 # Submodules live at the SDK repository root (sibling of this cpp/ directory).
 get_filename_component(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(CUARM_PANEL_ROOT "${SDK_ROOT}/..")
 set(ROBOT_PLATFORM_UTILS_DIR "${SDK_ROOT}/robot_platform_utils")
 set(CURI_UDP_DIR "${SDK_ROOT}/curi_udp")
-add_library(dual_arm_v2_2_control_sdk SHARED
+
+option(DUAL_ARM_V2_2_SDK_ENABLE_KINEMATICS
+    "Build SDK IK (Kinematics + AsyncDualArmController); requires cuarm_robotics"
+    ON)
+
+set(_dual_arm_sdk_sources
     src/control_api.cpp
     ${ROBOT_PLATFORM_UTILS_DIR}/cpp/src/config_loader.cpp
     ${ROBOT_PLATFORM_UTILS_DIR}/cpp/src/cuarm_message_handler.cpp
     ${ROBOT_PLATFORM_UTILS_DIR}/cpp/src/time_utils.cpp
     ${CURI_UDP_DIR}/c/curi_udp.c
 )
+
+if(DUAL_ARM_V2_2_SDK_ENABLE_KINEMATICS)
+    list(APPEND _dual_arm_sdk_sources
+        src/kinematics.cpp
+        src/async_dual_arm_controller.cpp
+    )
+endif()
+
+add_library(dual_arm_v2_2_control_sdk SHARED ${_dual_arm_sdk_sources})
+unset(_dual_arm_sdk_sources)
 add_library(dual_arm_v2_2_control_sdk::dual_arm_v2_2_control_sdk ALIAS dual_arm_v2_2_control_sdk)
 
 include(GNUInstallDirs)
@@ -41,6 +57,8 @@ target_include_directories(dual_arm_v2_2_control_sdk
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/dual_arm_v2_2_sdk>
     PRIVATE
         ${SDK_ROOT}
+        ${CUARM_PANEL_ROOT}
+        ${CUARM_PANEL_ROOT}/cuarm_rt_control
         ${ROBOT_PLATFORM_UTILS_DIR}/cpp/include
         ${CURI_UDP_DIR}/c
 )
@@ -57,6 +75,51 @@ target_link_libraries(dual_arm_v2_2_control_sdk
     PRIVATE ${_dual_arm_yaml}
 )
 unset(_dual_arm_yaml)
+
+if(DUAL_ARM_V2_2_SDK_ENABLE_KINEMATICS)
+    set(_robotics_src "${CUARM_PANEL_ROOT}/cuarm_rt_control/cuarm_robotics/src")
+    target_include_directories(dual_arm_v2_2_control_sdk PRIVATE
+        "${_robotics_src}"
+        "${CUARM_PANEL_ROOT}/cuarm_rt_control/cuarm_robotics/src/robotics"
+    )
+    set(_robotics_search "${CUARM_PANEL_ROOT}/cuarm_rt_control/build")
+    find_library(DUAL_ARM_ROBOTICS_LIB
+        NAMES robotics_lib
+        PATHS "${_robotics_search}/cuarm_robotics"
+        NO_DEFAULT_PATH
+    )
+    if(DUAL_ARM_ROBOTICS_LIB)
+        find_package(pinocchio REQUIRED)
+        find_package(Eigen3 REQUIRED)
+        find_package(Boost REQUIRED)
+        target_compile_definitions(dual_arm_v2_2_control_sdk
+            PUBLIC DUAL_ARM_V2_2_SDK_HAS_KINEMATICS=1
+            PRIVATE
+            EIGEN_QUATERNIONBASE_PLUGIN="${_robotics_src}/3rd_party/Eigen_QuaternionBase_Plugin.hpp"
+            EIGEN_MATRIX_PLUGIN="${_robotics_src}/3rd_party/Matrix_initializer_list.h"
+        )
+        target_link_libraries(dual_arm_v2_2_control_sdk
+            PRIVATE ${DUAL_ARM_ROBOTICS_LIB})
+        if(TARGET Eigen3::Eigen)
+            target_link_libraries(dual_arm_v2_2_control_sdk PRIVATE Eigen3::Eigen)
+        endif()
+        if(TARGET pinocchio::pinocchio)
+            target_link_libraries(dual_arm_v2_2_control_sdk PRIVATE pinocchio::pinocchio)
+        endif()
+    else()
+        set(ROBOT_PLATFORM_UTILS_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}"
+            CACHE PATH "robot_platform_utils binary dir")
+        add_subdirectory(
+            "${CUARM_PANEL_ROOT}/cuarm_rt_control/cuarm_robotics"
+            "${CMAKE_CURRENT_BINARY_DIR}/cuarm_robotics"
+        )
+        target_compile_definitions(dual_arm_v2_2_control_sdk
+            PUBLIC DUAL_ARM_V2_2_SDK_HAS_KINEMATICS=1)
+        target_link_libraries(dual_arm_v2_2_control_sdk
+            PRIVATE cuarm_robotics::robotics)
+    endif()
+    unset(_robotics_search)
+endif()
 
 set(_dual_arm_sdk_export dual_arm_v2_2_control_sdkTargets)
 install(TARGETS dual_arm_v2_2_control_sdk
