@@ -57,6 +57,15 @@ inline std::string config_path_from_args(int argc, char* argv[]) {
     return default_config_path();
 }
 
+inline bool ensure_teach_file_parent_dirs(const std::filesystem::path& file) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path parent = file.parent_path();
+    if (parent.empty()) return true;
+    fs::create_directories(parent, ec);
+    return !ec;
+}
+
 inline std::string default_teach_file_path() {
     namespace fs = std::filesystem;
     const fs::path exe_dir = executable_directory();
@@ -69,10 +78,15 @@ inline std::string default_teach_file_path() {
     for (const auto& file : candidates) {
         std::error_code ec;
         if (fs::exists(file, ec)) {
-            return fs::weakly_canonical(file).string();
+            const std::string path = fs::weakly_canonical(file).string();
+            ensure_teach_file_parent_dirs(fs::path(path));
+            return path;
         }
     }
-    return fs::weakly_canonical(candidates.front()).string();
+    const std::string path =
+        fs::weakly_canonical(candidates.front()).string();
+    ensure_teach_file_parent_dirs(fs::path(path));
+    return path;
 }
 constexpr int kDefaultStateTimeoutMs = 3000;
 constexpr float kPi = 3.14159265358979323846F;

@@ -34,6 +34,7 @@ set(_dual_arm_shared_examples
     test_move_line
     test_single_joint_increment
     test_get_joint_all
+    teach_and_playback
     teach_replay
     test_control_api
     test_control_api_various_command_frequency

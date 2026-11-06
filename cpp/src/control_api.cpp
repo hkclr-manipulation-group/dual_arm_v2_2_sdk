@@ -781,6 +781,44 @@ struct ControlApi::Impl {
         tool_stream_profile_initialized = false;
         return send_task_with_ack();
     }
+
+    void switch_target_type(ControlType target_type, ControlType actuator_mode) {
+        command.target_type = target_type;
+        command.actuator_mode = actuator_mode;
+        command.motion_type = MotionControl::kJoint;
+        command.arm_target_mode = PanelTargetMode::kSinglePoint;
+        if (!received_state.load()) return;
+        const PlannerState snapshot = state_snapshot();
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint) {
+                command.JointCmd[arm][joint] =
+                    (target_type == ControlType::kPosition)
+                        ? snapshot.JointPos[arm][joint]
+                        : 0.0F;
+            }
+        }
+    }
+
+    RetCode start_teach_mode_locked(bool gravity_comp) {
+        switch_target_type(ControlType::kTorque, ControlType::kTorque);
+        if (gravity_comp) {
+            command.motion_type = MotionControl::kControlAlgorithm;
+            command.control_algorithm = ControlAlgorithm::kGravity;
+        } else {
+            command.motion_type = MotionControl::kJoint;
+            command.control_algorithm = ControlAlgorithm::kNone;
+        }
+        command.need_setting_update = true;
+        return send_task_with_ack();
+    }
+
+    RetCode stop_teach_mode_locked() {
+        switch_target_type(ControlType::kPosition, ControlType::kPosition);
+        command.control_algorithm = ControlAlgorithm::kNone;
+        const RetCode result = send_task_with_ack();
+        command.need_setting_update = true;
+        return result;
+    }
 };
 
 ControlApi::ControlApi(const std::string& config_prefix_path)
@@ -1194,6 +1232,26 @@ ControlApi::get_gripper_state(Group group) const {
             {{"position", position},
              {"force", snapshot.GripperForce[gripper]},
              {"speed", snapshot.GripperSpeed[gripper]}}};
+}
+
+RetCode ControlApi::start_teach_mode(bool gravity_comp) {
+    stop_dual_arm_tool_line_auto_flush();
+    stop_dual_arm_streaming();
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
+    return impl_->start_teach_mode_locked(gravity_comp);
+}
+
+RetCode ControlApi::stop_teach_mode() {
+    stop_dual_arm_tool_line_auto_flush();
+    stop_dual_arm_streaming();
+    std::lock_guard<std::mutex> lock(impl_->command_mutex);
+    if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
+    RetCode result = impl_->stop_teach_mode_locked();
+    if (result != RetCode::SUCCESS) return result;
+    impl_->hold_all_groups_at_current_position();
+    impl_->sync_joint_target_cache_from_command();
+    return RetCode::SUCCESS;
 }
 
 }  // namespace dual_arm_v2_2_sdk

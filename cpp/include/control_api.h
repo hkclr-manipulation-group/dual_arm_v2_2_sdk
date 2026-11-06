@@ -117,6 +117,12 @@ public:
     std::tuple<RetCode, std::unordered_map<std::string, uint16_t>>
     get_gripper_state(Group group) const;
 
+    // Gravity-compensated teach mode (torque control + kGravity on rt_control).
+    // Requires force_control.gravity configured in robot YAML. Stops joint/tool
+    // streaming if active. Pair with stop_teach_mode() before move_joint replay.
+    RetCode start_teach_mode(bool gravity_comp = true);
+    RetCode stop_teach_mode();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

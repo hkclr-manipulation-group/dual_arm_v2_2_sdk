@@ -181,6 +181,13 @@ dual_arm_ret_code_t dual_arm_get_gripper_state(dual_arm_control_api_t* api,
                                                dual_arm_group_t group,
                                                dual_arm_gripper_state_t* out_state);
 
+/** Enter teach mode (gravity_comp != 0 -> kGravity compensation). */
+dual_arm_ret_code_t dual_arm_start_teach_mode(dual_arm_control_api_t* api,
+                                              int gravity_comp);
+
+/** Exit teach mode and hold arms at current feedback pose. */
+dual_arm_ret_code_t dual_arm_stop_teach_mode(dual_arm_control_api_t* api);
+
 #ifdef __cplusplus
 }
 #endif

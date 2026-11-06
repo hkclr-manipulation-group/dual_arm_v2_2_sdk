@@ -671,3 +671,31 @@ extern "C" dual_arm_ret_code_t dual_arm_get_gripper_state(
         return DUAL_ARM_RET_CONTROLLER_ERROR;
     }
 }
+
+extern "C" dual_arm_ret_code_t dual_arm_start_teach_mode(
+    dual_arm_control_api_t* api, int gravity_comp) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        return to_c_ret(api->cpp->start_teach_mode(gravity_comp != 0));
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}
+
+extern "C" dual_arm_ret_code_t dual_arm_stop_teach_mode(
+    dual_arm_control_api_t* api) {
+    if (api == nullptr || api->cpp == nullptr) {
+        set_last_error("Invalid API handle");
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+    try {
+        return to_c_ret(api->cpp->stop_teach_mode());
+    } catch (const std::exception& ex) {
+        set_last_error(ex);
+        return DUAL_ARM_RET_CONTROLLER_ERROR;
+    }
+}

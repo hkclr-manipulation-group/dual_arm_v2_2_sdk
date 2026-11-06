@@ -489,6 +489,23 @@ std::vector<float> get_joint_min_limit(Group group) const;
 
 ---
 
+## 9.4 示教模式（重力补偿拖动）
+
+```cpp
+RetCode start_teach_mode(bool gravity_comp = true);
+RetCode stop_teach_mode();
+```
+
+- `gravity_comp == true`：力矩模式 + `motion_type = kControlAlgorithm` + `control_algorithm = kGravity`，由 RT 做重力补偿，便于手拖采点。
+- `gravity_comp == false`：力矩模式、零力矩，臂在重力下自由下垂。
+- 进入/退出前会自动停止关节与 MoveL 流式发送。
+- 需在 `robot.arm[].force_control.gravity` 中配置有效 `ratio` / `kd`。
+- 采点与回放示例：`examples/cpp| c/teach_and_playback` → `teach_replay`（同一 `teach_points.txt` 格式，单位为度）。
+
+C API：`dual_arm_start_teach_mode(api, gravity_comp)`、`dual_arm_stop_teach_mode(api)`。
+
+---
+
 ## 10. 夹爪 API
 
 路径：`SDK → UDP → rt_control → CAN → RMD V4`

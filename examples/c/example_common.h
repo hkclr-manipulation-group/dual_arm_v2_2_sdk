@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -111,11 +112,42 @@ static inline void config_path_from_args(int argc, char* argv[], char* out,
     default_config_path(out, out_size);
 }
 
+static inline int ensure_teach_file_parent_dirs(const char* filepath) {
+    if (filepath == NULL || filepath[0] == '\0') {
+        return 0;
+    }
+    char path[kMaxPathLen];
+    if (snprintf(path, sizeof(path), "%s", filepath) <= 0) {
+        return 0;
+    }
+    char* last_slash = strrchr(path, '/');
+    if (last_slash == NULL) {
+        return 1;
+    }
+    *last_slash = '\0';
+    if (path[0] == '\0') {
+        return 1;
+    }
+    for (char* p = path + 1; *p != '\0'; ++p) {
+        if (*p != '/') {
+            continue;
+        }
+        *p = '\0';
+        if (path[0] != '\0') {
+            (void)mkdir(path, 0755);
+        }
+        *p = '/';
+    }
+    (void)mkdir(path, 0755);
+    return 1;
+}
+
 static inline void default_teach_file_path(char* out, size_t out_size) {
     char exe_dir[kMaxPathLen];
     if (!executable_directory(exe_dir, sizeof(exe_dir))) {
         snprintf(out, out_size,
                  "../../../examples/data/teach_points.txt");
+        ensure_teach_file_parent_dirs(out);
         return;
     }
 
@@ -128,10 +160,12 @@ static inline void default_teach_file_path(char* out, size_t out_size) {
         if (join_path(candidate, sizeof(candidate), exe_dir, candidates[i]) &&
             path_exists(candidate)) {
             snprintf(out, out_size, "%s", candidate);
+            ensure_teach_file_parent_dirs(out);
             return;
         }
     }
     join_path(out, out_size, exe_dir, candidates[0]);
+    ensure_teach_file_parent_dirs(out);
 }
 
 static inline int wait_for_joint_state(dual_arm_control_api_t* api,

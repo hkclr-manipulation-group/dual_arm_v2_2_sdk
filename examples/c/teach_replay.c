@@ -300,6 +300,7 @@ int main(int argc, char* argv[]) {
     } else {
         default_teach_file_path(teach_file, sizeof(teach_file));
     }
+    ensure_teach_file_parent_dirs(teach_file);
     default_config_path(config_path, sizeof(config_path));
 
     dual_arm_control_api_t* api = dual_arm_control_api_create(config_path);

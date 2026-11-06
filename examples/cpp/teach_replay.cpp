@@ -40,6 +40,7 @@ using dual_arm_v2_2_sdk::Group;
 using dual_arm_v2_2_sdk::RetCode;
 using example::default_config_path;
 using example::default_teach_file_path;
+using example::ensure_teach_file_parent_dirs;
 using example::kDegToRad;
 using example::kRadToDeg;
 using example::ret_code_name;
@@ -268,6 +269,7 @@ int main(int argc, char* argv[]) {
     try {
         const std::string teach_file =
             argc > 1 ? argv[1] : default_teach_file_path();
+        ensure_teach_file_parent_dirs(teach_file);
 
         ControlApi api(default_config_path());
         std::vector<float> left_current;
