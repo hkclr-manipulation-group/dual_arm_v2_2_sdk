@@ -14,6 +14,7 @@ endif()
 
 find_package(Threads REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Eigen3 3.3 QUIET)
 
 # Submodules live at the SDK repository root (sibling of this cpp/ directory).
 get_filename_component(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
@@ -56,6 +57,9 @@ target_link_libraries(dual_arm_v2_2_control_sdk
     PUBLIC Threads::Threads
     PRIVATE ${_dual_arm_yaml}
 )
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(dual_arm_v2_2_control_sdk PRIVATE Eigen3::Eigen)
+endif()
 unset(_dual_arm_yaml)
 
 set(_dual_arm_sdk_export dual_arm_v2_2_control_sdkTargets)

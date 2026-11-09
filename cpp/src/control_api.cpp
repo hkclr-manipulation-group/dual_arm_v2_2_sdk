@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <condition_variable>
+#include <iomanip>
+#include <iostream>
 #include <mutex>
 #include <thread>
 
@@ -27,9 +29,11 @@ constexpr int kAckTimeoutMs = 200;
 constexpr int kTaskAckTimeoutMs = 10000;
 constexpr int kTaskResendTimeoutMs = 1000;
 constexpr float kDegToRad = static_cast<float>(M_PI) / 180.0F;
+constexpr float kRadToDeg = 180.0F / static_cast<float>(M_PI);
 constexpr float kMinimumProfileTime = 0.01F;
 constexpr float kTaskPosEpsM = 1e-5F;
 constexpr float kTaskOriEpsRad = 1e-4F;
+constexpr float kTaskOriEpsDeg = kTaskOriEpsRad * kRadToDeg;
 
 float curve_fit_time(uint16_t radio) {
     // 0..100 maps to 10 ms..1.01 s; a larger value produces a smoother fit.
@@ -48,50 +52,96 @@ float filter_cutoff_frequency(uint16_t radio) {
 constexpr int kToolPoseSize = 7;
 
 struct EulerRpy {
-    float roll;
-    float pitch;
-    float yaw;
+    double roll;
+    double pitch;
+    double yaw;
 };
 
-EulerRpy quaternion_to_euler(float w, float x, float y, float z) {
-    const float sinr_cosp = 2.0F * (w * x + y * z);
-    const float cosr_cosp = 1.0F - 2.0F * (x * x + y * y);
-    const float roll = std::atan2(sinr_cosp, cosr_cosp);
+struct Quat {
+    double w;
+    double x;
+    double y;
+    double z;
+};
 
-    const float sinp = 2.0F * (w * y - z * x);
-    float pitch;
-    if (std::abs(sinp) >= 1.0F) {
-        pitch = std::copysign(static_cast<float>(M_PI) / 2.0F, sinp);
-    } else {
-        pitch = std::asin(sinp);
+// q_cur^{-1} * q_tar. Inverse of RoboticsBase::toQuat (Rx then Ry then Rz)
+// when the target was built as q_cur * toQuat(Δ).
+Quat get_relative_quat(const float cur[4], const float tar[4]) {
+    const double cw = cur[0];
+    const double cx = -cur[1];
+    const double cy = -cur[2];
+    const double cz = -cur[3];
+    const double tw = tar[0];
+    const double tx = tar[1];
+    const double ty = tar[2];
+    const double tz = tar[3];
+
+    Quat q;
+    q.w = cw * tw - cx * tx - cy * ty - cz * tz;
+    q.x = cw * tx + cx * tw + cy * tz - cz * ty;
+    q.y = cw * ty - cx * tz + cy * tw + cz * tx;
+    q.z = cw * tz + cx * ty - cy * tx + cz * tw;
+
+    const double n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
+    if (n > 1e-6) {
+        q.w /= n;
+        q.x /= n;
+        q.y /= n;
+        q.z /= n;
     }
+    return q;
+}
 
-    const float siny_cosp = 2.0F * (w * z + x * y);
-    const float cosy_cosp = 1.0F - 2.0F * (y * y + z * z);
-    const float yaw = std::atan2(siny_cosp, cosy_cosp);
+// Matches Eigen R.eulerAngles(0, 1, 2), the inverse of RoboticsBase::toQuat.
+EulerRpy quaternion_to_eigen_euler_xyz(double w, double x, double y, double z) {
+    const double r00 = 1.0 - 2.0 * (y * y + z * z);
+    const double r01 = 2.0 * (x * y - w * z);
+    const double r02 = 2.0 * (x * z + w * y);
+    const double r12 = 2.0 * (y * z - w * x);
+    const double r22 = 1.0 - 2.0 * (x * x + y * y);
+
+    const double pitch = std::asin(std::max(-1.0, std::min(1.0, r02)));
+    const double cy = std::cos(pitch);
+    double roll = 0.0;
+    double yaw = 0.0;
+    if (cy > 1e-4) {
+        roll = std::atan2(-r12, r22);
+        yaw = std::atan2(-r01, r00);
+    } else {
+        const double r10 = 2.0 * (x * y + w * z);
+        const double r11 = 1.0 - 2.0 * (x * x + z * z);
+        roll = r02 > 0.0 ? std::atan2(r10, r11) : -std::atan2(r10, r11);
+    }
     return {roll, pitch, yaw};
 }
 
+// kEnd MoveL: R_target = R0 * toR(rpy_cmd) => rpy_cmd = eulerXYZ(R0^T * R_target).
 void fill_task_line_delta(float* task_cmd_deg,
                           const float current_tool_pose[kToolPoseSize],
                           const float target_tool_pose[kToolPoseSize]) {
-    const EulerRpy current_euler = quaternion_to_euler(
-        current_tool_pose[3], current_tool_pose[4],
-        current_tool_pose[5], current_tool_pose[6]);
-    const EulerRpy target_euler = quaternion_to_euler(
-        target_tool_pose[3], target_tool_pose[4],
-        target_tool_pose[5], target_tool_pose[6]);
-
     task_cmd_deg[0] = target_tool_pose[0] - current_tool_pose[0];
     task_cmd_deg[1] = target_tool_pose[1] - current_tool_pose[1];
     task_cmd_deg[2] = target_tool_pose[2] - current_tool_pose[2];
-    task_cmd_deg[3] = target_euler.roll - current_euler.roll;
-    task_cmd_deg[4] = target_euler.pitch - current_euler.pitch;
-    task_cmd_deg[5] = target_euler.yaw - current_euler.yaw;
+
+    const Quat q_rel =
+        get_relative_quat(&current_tool_pose[3], &target_tool_pose[3]);
+    const EulerRpy rpy_inc =
+        quaternion_to_eigen_euler_xyz(q_rel.w, q_rel.x, q_rel.y, q_rel.z);
+
+    // TaskCmdDeg[3..5] are degrees; TaskCmd gets radians via sync_task_cmd_from_deg.
+    task_cmd_deg[3] = static_cast<float>(rpy_inc.roll * kRadToDeg);
+    task_cmd_deg[4] = static_cast<float>(rpy_inc.pitch * kRadToDeg);
+    task_cmd_deg[5] = static_cast<float>(rpy_inc.yaw * kRadToDeg);
 }
 
 float clamp_speed_ratio(uint16_t speed_ratio) {
     return std::clamp(static_cast<float>(speed_ratio) / 100.0F, 0.0F, 1.0F);
+}
+
+const char* tool_arm_label(int arm) {
+    if (arm == 0) return "L";
+    if (arm == 2) return "R";
+    return "?";
 }
 
 }  // namespace
@@ -124,6 +174,8 @@ struct ControlApi::Impl {
     float tool_target_cache[MAX_ARM_SIZE][kToolPoseSize]{};
     bool tool_target_cache_valid = false;
     std::array<bool, MAX_ARM_SIZE> tool_target_dirty{};
+    float movel_target_tool_pose_[MAX_ARM_SIZE][kToolPoseSize]{};
+    std::array<bool, MAX_ARM_SIZE> movel_target_valid_{};
     std::thread tool_streaming_thread;
     std::atomic<bool> tool_streaming_active{false};
     std::condition_variable tool_flush_cv;
@@ -355,6 +407,35 @@ struct ControlApi::Impl {
         }
     }
 
+    void log_movel_udp_payload() const {
+        if (static_cast<MotionControl>(command.motion_type) !=
+            MotionControl::kTaskLine) {
+            return;
+        }
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "[ControlApi] UDP MoveL send seq(next)="
+                  << command.sequence_id << '\n';
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            if (!is_tool_motion_arm(arm) || !movel_target_valid_[arm]) continue;
+            const float* t = movel_target_tool_pose_[arm];
+            const float* deg = command.TaskCmdDeg[arm];
+            const float* rad = command.TaskCmd[arm];
+            std::cout << "  arm[" << arm << "] " << tool_arm_label(arm)
+                      << " target_tool_pose (m,qw,qx,qy,qz): " << t[0] << ", "
+                      << t[1] << ", " << t[2] << ", " << t[3] << ", " << t[4]
+                      << ", " << t[5] << ", " << t[6] << '\n';
+            std::cout << std::setprecision(3);
+            std::cout << "    TaskCmdDeg [dx,dy,dz m | r,p,y deg]: " << deg[0]
+                      << ", " << deg[1] << ", " << deg[2] << ", " << deg[3]
+                      << ", " << deg[4] << ", " << deg[5] << '\n';
+            std::cout << std::setprecision(6);
+            std::cout << "    TaskCmd    [dx,dy,dz m | r,p,y rad]: " << rad[0]
+                      << ", " << rad[1] << ", " << rad[2] << ", " << rad[3]
+                      << ", " << rad[4] << ", " << rad[5] << '\n';
+        }
+        std::cout << std::flush;
+    }
+
     bool is_latest_target_received() const {
         return state_snapshot().received_sequence_id == command.sequence_id - 1;
     }
@@ -375,6 +456,7 @@ struct ControlApi::Impl {
         while (elapsed_ms < kTaskAckTimeoutMs && need_send) {
             synchronize_sequence_with_planner();
             sync_task_cmd_from_deg();
+            log_movel_udp_payload();
             if (!send_once()) return RetCode::SEND_FAILED;
 
             int wait_ms = 0;
@@ -604,7 +686,7 @@ struct ControlApi::Impl {
     bool task_delta_near_zero(const std::vector<int>& arm_indices) const {
         for (int arm : arm_indices) {
             for (int axis = 0; axis < 6; ++axis) {
-                const float eps = axis < 3 ? kTaskPosEpsM : kTaskOriEpsRad;
+                const float eps = axis < 3 ? kTaskPosEpsM : kTaskOriEpsDeg;
                 if (std::abs(command.TaskCmdDeg[arm][axis]) > eps) return false;
             }
         }
@@ -679,6 +761,9 @@ struct ControlApi::Impl {
             }
             fill_task_line_delta(command.TaskCmdDeg[arm], current_tool_pose,
                                  target_pose);
+            for (int i = 0; i < kToolPoseSize; ++i)
+                movel_target_tool_pose_[arm][i] = target_pose[i];
+            movel_target_valid_[arm] = true;
         }
     }
 
@@ -708,6 +793,9 @@ struct ControlApi::Impl {
 
             fill_task_line_delta(command.TaskCmdDeg[arm], current_tool_pose,
                                  target_pose);
+            for (int i = 0; i < kToolPoseSize; ++i)
+                movel_target_tool_pose_[arm][i] = target_pose[i];
+            movel_target_valid_[arm] = true;
         }
     }
 

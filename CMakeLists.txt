@@ -51,6 +51,7 @@ set(_dual_arm_cpp_only_examples
     dual_arm_independent_move_line
     test_dual_arm_sequential_move_line
     dual_two_control_api
+    test_movel
 )
 
 option(DUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES "Build C++ SDK example programs" ON)

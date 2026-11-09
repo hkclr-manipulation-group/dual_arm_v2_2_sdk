@@ -1,3 +1,4 @@
 build/
 .cache/
 examples/data/
+**/encoder_last_position.bin
