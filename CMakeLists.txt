@@ -27,6 +27,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 add_subdirectory(cpp)
 add_subdirectory(c)
 
+if(DUAL_ARM_V2_2_SDK_BUILD_PYTHON)
+    add_subdirectory(python)
+endif()
+
 # C 与 C++ 均有源码的示例
 set(_dual_arm_shared_examples
     go_home
