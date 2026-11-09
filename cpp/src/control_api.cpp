@@ -24,7 +24,10 @@
 namespace dual_arm_v2_2_sdk {
 namespace {
 
-constexpr int kBufferSize = 4096;
+// PlannerState on the wire is about 7 KB. A 4096-byte receive buffer cuts off
+// system_state and the diagnostic flags; the failed sscanf then leaves stack
+// garbage that motion_fault() treats as a controller fault.
+constexpr int kBufferSize = 16384;
 constexpr int kAckTimeoutMs = 200;
 constexpr int kTaskAckTimeoutMs = 10000;
 constexpr int kTaskResendTimeoutMs = 1000;
@@ -34,6 +37,21 @@ constexpr float kMinimumProfileTime = 0.01F;
 constexpr float kTaskPosEpsM = 1e-5F;
 constexpr float kTaskOriEpsRad = 1e-4F;
 constexpr float kTaskOriEpsDeg = kTaskOriEpsRad * kRadToDeg;
+// Feedback "arrived" window. Packet ACK is not arrival: quintic keeps running
+// after the planner echoes the sequence.
+constexpr float kJointReachTolRad = 0.01F * kDegToRad;
+constexpr float kToolPosReachTolM = 0.0005F;
+constexpr float kToolRotReachTolRad = 0.01F * kDegToRad;
+constexpr int kReachStableCycles = 3;
+constexpr int kReachPollMs = 20;
+constexpr int kMotionReachTimeoutMs = 20000;
+constexpr uint32_t kMotionFaultMask =
+    DiagnosticFlags::kFaultPosHardLimitReached |
+    DiagnosticFlags::kFaultVelHardLimitReached |
+    DiagnosticFlags::kFaultTorHardLimitReached |
+    DiagnosticFlags::kFaultPosTrackingFailed |
+    DiagnosticFlags::kFaultVelTrackingFailed |
+    DiagnosticFlags::kFaultTorTrackingFailed;
 
 float curve_fit_time(uint16_t radio) {
     // 0..100 maps to 10 ms..1.01 s; a larger value produces a smoother fit.
@@ -90,6 +108,13 @@ Quat get_relative_quat(const float cur[4], const float tar[4]) {
         q.z /= n;
     }
     return q;
+}
+
+float tool_rotation_error_rad(const float current_quat[4],
+                              const float target_quat[4]) {
+    const Quat relative = get_relative_quat(current_quat, target_quat);
+    const double w = std::min(1.0, std::abs(relative.w));
+    return static_cast<float>(2.0 * std::acos(w));
 }
 
 // Matches Eigen R.eulerAngles(0, 1, 2), the inverse of RoboticsBase::toQuat.
@@ -383,6 +408,79 @@ struct ControlApi::Impl {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         return false;
+    }
+
+    RetCode motion_fault(const std::vector<int>& arm_indices) const {
+        const PlannerState snapshot = state_snapshot();
+        if (snapshot.system_state == SystemState::kError ||
+            (snapshot.system_diagnostic_flags & kMotionFaultMask) != 0)
+            return RetCode::CONTROLLER_ERROR;
+        for (int arm : arm_indices) {
+            if (arm < 0 || arm >= static_cast<int>(joint_sizes.size())) continue;
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint) {
+                if ((snapshot.arm_joint_diagnostic_flags[arm][joint] &
+                     kMotionFaultMask) != 0)
+                    return RetCode::CONTROLLER_ERROR;
+            }
+        }
+        return RetCode::SUCCESS;
+    }
+
+    bool joints_reached(const std::vector<int>& arm_indices,
+                        const std::vector<float>& joints) const {
+        const PlannerState snapshot = state_snapshot();
+        size_t source = 0;
+        for (int arm : arm_indices) {
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint) {
+                if (source >= joints.size()) return false;
+                if (std::abs(snapshot.JointPos[arm][joint] - joints[source]) >
+                    kJointReachTolRad)
+                    return false;
+                ++source;
+            }
+        }
+        return source == joints.size();
+    }
+
+    bool tool_pose_reached(const std::vector<int>& arm_indices,
+                           const std::vector<float>& target_tool_pose) const {
+        const PlannerState snapshot = state_snapshot();
+        size_t source = 0;
+        for (int arm : arm_indices) {
+            if (source + static_cast<size_t>(kToolPoseSize) > target_tool_pose.size())
+                return false;
+            const float* current = snapshot.ToolPose[arm];
+            const float* target = target_tool_pose.data() + source;
+            const float dx = current[0] - target[0];
+            const float dy = current[1] - target[1];
+            const float dz = current[2] - target[2];
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) > kToolPosReachTolM)
+                return false;
+            if (tool_rotation_error_rad(&current[3], &target[3]) > kToolRotReachTolRad)
+                return false;
+            source += static_cast<size_t>(kToolPoseSize);
+        }
+        return true;
+    }
+
+    template <typename Reached>
+    RetCode wait_until_reached(const std::vector<int>& arm_indices,
+                               Reached reached) const {
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(kMotionReachTimeoutMs);
+        int stable = 0;
+        while (std::chrono::steady_clock::now() < deadline) {
+            const RetCode fault = motion_fault(arm_indices);
+            if (fault != RetCode::SUCCESS) return fault;
+            if (reached()) {
+                if (++stable >= kReachStableCycles) return RetCode::SUCCESS;
+            } else {
+                stable = 0;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(kReachPollMs));
+        }
+        return RetCode::TIMEOUT;
     }
 
     RetCode send_with_ack(int timeout_ms = kAckTimeoutMs) {
@@ -953,8 +1051,12 @@ RetCode ControlApi::move_line(Group group,
     if (arm_indices.empty()) return RetCode::CONTROLLER_ERROR;
     if (target_tool_pose.size() != impl_->expected_tool_pose_count(group))
         return RetCode::CONTROLLER_ERROR;
-    return impl_->send_task_line_command(arm_indices, target_tool_pose,
-                                         speed_ratio, acc_time);
+    const RetCode sent = impl_->send_task_line_command(
+        arm_indices, target_tool_pose, speed_ratio, acc_time);
+    if (sent != RetCode::SUCCESS) return sent;
+    return impl_->wait_until_reached(arm_indices, [&] {
+        return impl_->tool_pose_reached(arm_indices, target_tool_pose);
+    });
 }
 
 std::tuple<RetCode, std::vector<float>>
@@ -1004,9 +1106,11 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
 
     // High-follow calls must remain non-blocking so the caller can maintain <=10 ms cadence.
     if (follow) return RetCode::SUCCESS;
-    return impl_->wait_for_ack(sequence, generation_before_send)
-               ? RetCode::SUCCESS
-               : RetCode::TIMEOUT;
+    if (!impl_->wait_for_ack(sequence, generation_before_send))
+        return RetCode::TIMEOUT;
+    return impl_->wait_until_reached(indices, [&] {
+        return impl_->joints_reached(indices, joints);
+    });
 }
 
 RetCode ControlApi::set_joint_target(Group group,

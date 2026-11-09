@@ -44,6 +44,10 @@ public:
     RetCode set_group(Group group, bool enable);
     std::tuple<RetCode, std::vector<State>> get_group_state(Group group) const;
 
+    // Low follow (follow=false): send one quintic point, then block until each
+    // commanded joint is within 0.01 deg for 3 samples, or TIMEOUT at 20 s.
+    // High follow (follow=true) returns after the packet is sent so the caller
+    // can keep a <=10 ms cadence. It does not wait for the arm to arrive.
     RetCode move_joint(Group group, const std::vector<float>& joints,
                        bool follow = false, uint8_t trajectory_mode = 0,
                        uint16_t radio = 0);
@@ -52,6 +56,8 @@ public:
     // target_tool_pose layout per arm: x, y, z (m), qw, qx, qy, qz — same frame as
     // get_tool_pose() / PlannerState ToolPose. LEFT_ARM or RIGHT_ARM -> 7 floats;
     // ALL -> 14 floats (left arm then right arm; head is held with zero task delta).
+    // Blocks until each commanded tool pose is within 0.5 mm and 0.01 deg for 3
+    // samples, or TIMEOUT at 20 s. Tracking faults return CONTROLLER_ERROR.
     RetCode move_line(Group group, const std::vector<float>& target_tool_pose,
                       uint16_t speed_ratio = 50, float acc_time = 0.0f);
 

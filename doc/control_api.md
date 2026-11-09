@@ -60,7 +60,7 @@ C 对应：`dual_arm_group_t`（`DUAL_ARM_GROUP_*`）。
 | `-1` | `SEND_FAILED` | UDP 发送失败 |
 | `-2` | `RECEIVE_FAILED` | 未收到有效状态或接收失败 |
 | `-3` | `PARSE_FAILED` | 返回值解析失败 |
-| `-4` | `TIMEOUT` | 等待控制器确认超时（低跟随 / 阻塞夹爪） |
+| `-4` | `TIMEOUT` | 等待控制器确认或运动到位超时（低跟随 `move_joint` / `move_line` / 阻塞夹爪） |
 
 C 对应：`dual_arm_ret_code_t`（`DUAL_ARM_RET_*`）。  
 辅助函数：`dual_arm_ret_code_name()`、`dual_arm_control_api_last_error()`。
@@ -137,8 +137,8 @@ RetCode move_joint(Group group,
 **行为**：
 
 - 未选中的 arm 组保持**当前反馈位姿**（`hold_unselected_groups`）
-- `follow=true`：**非阻塞**，立即返回，调用方须维持 **≤10 ms** 发包周期
-- `follow=false`：阻塞等待 ACK（默认超时约 200 ms）
+- `follow=true`：**非阻塞**，发包后立即返回，调用方须维持 **≤10 ms** 发包周期。高跟随没有“这一段走完”的事件，不能阻塞到位
+- `follow=false`：先等控制器 ACK（约 200 ms），再阻塞到各指令关节反馈与目标差 **≤ 0.01°** 且连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`；跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
 
 ### 高跟随模式映射
 
@@ -181,7 +181,7 @@ std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
 
 - 从 `PlannerState::ToolPose` 读当前位姿，计算相对增量写入 `TaskCmdDeg`
 - 未参与运动的 arm：`TaskCmdDeg = 0`（保持不动）
-- `motion_type = kTaskLine`，阻塞等待 ACK
+- `motion_type = kTaskLine`。控制器 ACK 之后继续阻塞，直到各指令臂末端与目标的位置差 **≤ 0.5 mm**、姿态差 **≤ 0.01°**，并连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`。跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
 - **关节 streaming 或 Tool MoveL auto flush 激活时**返回 `CONTROLLER_ERROR`
 
 C：
@@ -195,7 +195,7 @@ C：
 
 ## 5.2 独立双臂 MoveL：缓存 + 合包（低跟随）
 
-与第 5.1 节 `move_line` 相同底层模式（`kTaskLine`、阻塞 ACK、quintic），但目标按**左/右分别写入 SDK 缓存**，再合并为**一个 UDP 包**里的左右 `TaskCmd`。适用于「不想一次构造 `ALL` 的 14 维向量、又希望左右在同一时刻各走一条直线」的场景。
+与第 5.1 节 `move_line` 相同的 `kTaskLine` + quintic，但这里只阻塞到控制器 ACK，不等末端到位。`move_line` 本身会等到位。目标按**左/右分别写入 SDK 缓存**，再合并为**一个 UDP 包**里的左右 `TaskCmd`。适用于「不想一次构造 `ALL` 的 14 维向量、又希望左右在同一时刻各走一条直线」的场景。
 
 **位姿格式**（与 `get_tool_pose` / `move_line` 一致，每臂 7 个数）：
 
@@ -276,7 +276,7 @@ RetCode start_dual_arm_tool_line_auto_flush(uint16_t speed_ratio = 50,
 
 **行为**：
 
-- 启动后台线程；之后每次 `set_left/right_tool_line_target` 触发 coalesce，再调用 `send_task_with_ack`（**低跟随、阻塞**直到该段 MoveL 完成）。
+- 启动后台线程；之后每次 `set_left/right_tool_line_target` 触发 coalesce，再调用 `send_task_with_ack`（**低跟随、阻塞到该包 ACK**，不是末端到位）。
 - 本周期 **未 set 的左/右臂**：**sticky**——保持 cache 中上次目标（与关节 streaming 类似，而非 flush 的 feedback hold）。
 - 首次启动会从反馈同步 cache；与关节 streaming 或重复 start 互斥时返回 `CONTROLLER_ERROR`。
 
@@ -577,7 +577,7 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 
 | 模式 | 发包 | 未更新臂行为 | 用户周期要求 |
 |------|------|--------------|--------------|
-| `move_joint` 单组 | 立即 1 包 | 其他组 feedback hold | 高跟随 ≤10 ms |
+| `move_joint` 单组 | 立即 1 包 | 其他组 feedback hold | 低跟随阻塞至到位；高跟随 ≤10 ms |
 | `both-flush` | 用户 flush 1 包 | 未 dirty 臂 feedback hold | 高跟随 ≤10 ms |
 | `both-stream` | SDK `@hz` | 左/右 sticky 上次目标 | 仅更新目标，无 flush |
 | Tool `flush_tool_line` | 用户 flush 1 包 | 未 dirty 臂 feedback hold | 低跟随，阻塞 ACK |

@@ -36,7 +36,7 @@ using example::wait_for_joint_state;
 
 namespace {
 
-constexpr uint16_t kSpeedRatio = 80;
+constexpr uint16_t kSpeedRatio = 30;
 constexpr float kMoveLineAccTimeS = 3.0F;
 constexpr float kPosToleranceM = 0.001F;
 constexpr float kRotToleranceRad = 0.01F * kDegToRad;
