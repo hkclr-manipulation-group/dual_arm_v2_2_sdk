@@ -27,6 +27,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 add_subdirectory(cpp)
 add_subdirectory(c)
 
+option(DUAL_ARM_V2_2_SDK_BUILD_PYTHON "Build Python pybind11 extension" OFF)
 if(DUAL_ARM_V2_2_SDK_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
