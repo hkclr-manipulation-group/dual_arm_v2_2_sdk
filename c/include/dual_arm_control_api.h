@@ -60,11 +60,13 @@ dual_arm_ret_code_t dual_arm_get_group_state(dual_arm_control_api_t* api,
                                              size_t out_capacity,
                                              size_t* out_count);
 
+/* speed_ratio applies only when follow == 0. 0 keeps the full joint-velocity
+   soft limit; 1..100 scales it. Values above 100 fail. Pass 0 when follow != 0. */
 dual_arm_ret_code_t dual_arm_move_joint(dual_arm_control_api_t* api,
                                         dual_arm_group_t group,
                                         const float* joints, size_t joint_count,
                                         int follow, uint8_t trajectory_mode,
-                                        uint16_t radio);
+                                        uint16_t radio, uint16_t speed_ratio);
 
 /** MoveL: 7 floats per arm (x,y,z,qw,qx,qy,qz). LEFT/RIGHT -> 7; ALL -> 14. */
 dual_arm_ret_code_t dual_arm_move_line(dual_arm_control_api_t* api,

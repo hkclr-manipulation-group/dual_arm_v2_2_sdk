@@ -215,7 +215,7 @@ static int move_single_joint(dual_arm_control_api_t* api, dual_arm_group_t arm,
     printf("    %s J%d command delta: %+.3f deg\n",
            dual_arm_group_name(arm), joint_index + 1, delta_deg);
 
-    if (dual_arm_move_joint(api, arm, target, count, 0, 0, 0) !=
+    if (dual_arm_move_joint(api, arm, target, count, 0, 0, 0, 0) !=
         DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "move_joint failed\n");
         return 0;

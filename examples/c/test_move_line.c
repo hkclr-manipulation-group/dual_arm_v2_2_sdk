@@ -209,7 +209,7 @@ static int move_to_initial_pose(dual_arm_control_api_t* api,
     print_joints_deg("  target", target, kArmJointCount);
 
     const dual_arm_ret_code_t code = dual_arm_move_joint(
-        api, group, target, kArmJointCount, 0, 0, 0);
+        api, group, target, kArmJointCount, 0, 0, 0, 0);
     printf("  move_joint: %s\n", dual_arm_ret_code_name(code));
     if (code != DUAL_ARM_RET_SUCCESS) return 0;
 
@@ -258,7 +258,7 @@ static int hold_current_joint_pose(dual_arm_control_api_t* api,
     print_joints_deg("  hold", current, count);
 
     const dual_arm_ret_code_t code = dual_arm_move_joint(
-        api, group, current, kArmJointCount, 0, 0, 0);
+        api, group, current, kArmJointCount, 0, 0, 0, 0);
     printf("  move_joint: %s\n", dual_arm_ret_code_name(code));
     if (code != DUAL_ARM_RET_SUCCESS) return 0;
 
@@ -304,7 +304,7 @@ static int go_home(dual_arm_control_api_t* api, dual_arm_group_t group) {
 
     printf("\n==> go home (%s, all joints -> 0)\n", dual_arm_group_name(group));
     const dual_arm_ret_code_t code = dual_arm_move_joint(
-        api, group, zero, kArmJointCount, 0, 0, 0);
+        api, group, zero, kArmJointCount, 0, 0, 0, 0);
     printf("  move_joint: %s\n", dual_arm_ret_code_name(code));
     if (code != DUAL_ARM_RET_SUCCESS) return 0;
 

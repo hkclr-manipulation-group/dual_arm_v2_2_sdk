@@ -58,7 +58,7 @@ static void* example_velocity_guard_thread(void* arg) {
                                            &pos_count) == DUAL_ARM_RET_SUCCESS) {
                         const dual_arm_ret_code_t hold = dual_arm_move_joint(
                             guard->api, guard->group, position, pos_count, 1,
-                            0, 0);
+                            0, 0, 0);
                         fprintf(stderr, "Current-position hold command: %s\n",
                                 dual_arm_ret_code_name(hold));
                     } else {

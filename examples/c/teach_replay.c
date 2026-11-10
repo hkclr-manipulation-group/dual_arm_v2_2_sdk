@@ -233,7 +233,7 @@ static int move_both_arms(dual_arm_control_api_t* api,
                         &all_count);
 
     const dual_arm_ret_code_t code =
-        dual_arm_move_joint(api, DUAL_ARM_GROUP_ALL, all, all_count, 0, 0, 0);
+        dual_arm_move_joint(api, DUAL_ARM_GROUP_ALL, all, all_count, 0, 0, 0, 0);
     if (code != DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "move_joint(ALL): %s\n",
                 dual_arm_ret_code_name(code));

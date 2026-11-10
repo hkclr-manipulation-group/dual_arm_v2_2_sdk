@@ -223,7 +223,8 @@ extern "C" dual_arm_ret_code_t dual_arm_get_tool_pose(
 
 extern "C" dual_arm_ret_code_t dual_arm_move_joint(
     dual_arm_control_api_t* api, dual_arm_group_t group, const float* joints,
-    size_t joint_count, int follow, uint8_t trajectory_mode, uint16_t radio) {
+    size_t joint_count, int follow, uint8_t trajectory_mode, uint16_t radio,
+    uint16_t speed_ratio) {
     if (api == nullptr || api->cpp == nullptr) {
         set_last_error("Invalid API handle");
         return DUAL_ARM_RET_CONTROLLER_ERROR;
@@ -235,7 +236,7 @@ extern "C" dual_arm_ret_code_t dual_arm_move_joint(
     try {
         const std::vector<float> values(joints, joints + joint_count);
         return to_c_ret(api->cpp->move_joint(to_cpp_group(group), values, follow != 0,
-                                             trajectory_mode, radio));
+                                             trajectory_mode, radio, speed_ratio));
     } catch (const std::exception& ex) {
         set_last_error(ex);
         return DUAL_ARM_RET_CONTROLLER_ERROR;

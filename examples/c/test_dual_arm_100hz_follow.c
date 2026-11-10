@@ -531,7 +531,7 @@ static void read_arm(dual_arm_control_api_t* api, ArmContext* arm) {
 
 static void write_arm(dual_arm_control_api_t* api, ArmContext* arm) {
     const dual_arm_ret_code_t ret = dual_arm_move_joint(
-        api, arm->group, arm->cmd, arm->joint_count, 1, kTrajectoryMode, kRadio);
+        api, arm->group, arm->cmd, arm->joint_count, 1, kTrajectoryMode, kRadio, 0);
     if (ret != DUAL_ARM_RET_SUCCESS) {
         ++arm->stats.write_fail;
     }
@@ -792,7 +792,7 @@ static int go_home_both(dual_arm_control_api_t* api, size_t left_count,
     concat_three_groups(left_zero, left_count, head_now, head_count, right_zero,
                         right_count, all, kMaxJoints, &all_count);
 
-    if (dual_arm_move_joint(api, DUAL_ARM_GROUP_ALL, all, all_count, 0, 0, 0) !=
+    if (dual_arm_move_joint(api, DUAL_ARM_GROUP_ALL, all, all_count, 0, 0, 0, 0) !=
         DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "go-home move_joint(ALL) failed\n");
         return 0;
@@ -819,7 +819,7 @@ static int hold_current(dual_arm_control_api_t* api, int use_left,
         if (dual_arm_get_joint(api, DUAL_ARM_GROUP_LEFT_ARM, pos, kMaxJoints,
                                &count) == DUAL_ARM_RET_SUCCESS) {
             dual_arm_move_joint(api, DUAL_ARM_GROUP_LEFT_ARM, pos, count, 1, 0,
-                                0);
+                                0, 0);
         }
     }
     if (use_right) {
@@ -828,7 +828,7 @@ static int hold_current(dual_arm_control_api_t* api, int use_left,
         if (dual_arm_get_joint(api, DUAL_ARM_GROUP_RIGHT_ARM, pos, kMaxJoints,
                                &count) == DUAL_ARM_RET_SUCCESS) {
             dual_arm_move_joint(api, DUAL_ARM_GROUP_RIGHT_ARM, pos, count, 1, 0,
-                                0);
+                                0, 0);
         }
     }
     return 1;
@@ -1095,7 +1095,7 @@ static int run_stage(dual_arm_control_api_t* api, const char* stage,
                                     all, kMaxJoints, &all_count);
                 const dual_arm_ret_code_t ret = dual_arm_move_joint(
                     api, DUAL_ARM_GROUP_ALL, all, all_count, 1, kTrajectoryMode,
-                    kRadio);
+                    kRadio, 0);
                 if (ret != DUAL_ARM_RET_SUCCESS) {
                     ++left.stats.write_fail;
                     ++right.stats.write_fail;

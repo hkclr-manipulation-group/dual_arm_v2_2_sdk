@@ -699,11 +699,18 @@ struct ControlApi::Impl {
     }
 
     void apply_joint_motion_profile(bool follow, uint8_t trajectory_mode,
-                                    uint16_t radio) {
+                                    uint16_t radio, uint16_t speed_ratio = 0) {
         command.motion_type = MotionControl::kJoint;
         command.target_type = ControlType::kPosition;
         command.actuator_mode = ControlType::kPosition;
-        command.interpolation_speed_ratio = 1.0F;
+        // High follow ignores speed_ratio. A wire value of 0 is not safe there:
+        // rt_control only rewrites 0 to full speed when acc_time > 0, and
+        // raw-follow mode sends acc_time 0.
+        const float speed_scale =
+            (!follow && speed_ratio > 0)
+                ? static_cast<float>(speed_ratio) / 100.0F
+                : 1.0F;
+        command.interpolation_speed_ratio = speed_scale;
         command.InterpolationConstVelTime = 0.0F;
 
         if (!follow) {
@@ -1076,7 +1083,8 @@ ControlApi::get_tool_pose(Group group) const {
 }
 
 RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
-                               bool follow, uint8_t trajectory_mode, uint16_t radio) {
+                               bool follow, uint8_t trajectory_mode, uint16_t radio,
+                               uint16_t speed_ratio) {
     if (impl_->tool_streaming_active.load()) return RetCode::CONTROLLER_ERROR;
     std::lock_guard<std::mutex> lock(impl_->command_mutex);
     const auto indices = impl_->group_indices(group);
@@ -1086,9 +1094,10 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
                    (trajectory_mode == 1 && radio > 100) ||
                    (trajectory_mode == 2 && radio > 999)))
         return RetCode::CONTROLLER_ERROR;
+    if (!follow && speed_ratio > 100) return RetCode::CONTROLLER_ERROR;
     if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
 
-    impl_->apply_joint_motion_profile(follow, trajectory_mode, radio);
+    impl_->apply_joint_motion_profile(follow, trajectory_mode, radio, speed_ratio);
     impl_->hold_unselected_groups(indices);
     size_t source = 0;
     for (int arm : indices)

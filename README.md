@@ -164,6 +164,7 @@ export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
 - **禁止源码内构建**：请勿在仓库根目录直接 `cmake .`；始终使用 `-S . -B build`。
 - **关闭 C++ 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES=OFF`
 - **关闭 C 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF`
+- **Python 绑定**（默认关闭）：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON`，然后 `PYTHONPATH=build/python python3 examples/python/go_home.py`。打包见 [`python/README.md`](python/README.md)
 - **默认安装前缀**：`build/install`（`cmake --install build`）
 
 示例程序通过 [`examples/example_common.h`](examples/example_common.h) 中的 `default_config_path()` **按可执行文件位置**自动查找 `cuarm_configuration/dual_v2_2`，因此从 `build/` 或 `build/bin/` 启动都能找到配置。自定义布局时，可修改该函数，或在集成时向 `ControlApi` 传入绝对路径。

@@ -230,7 +230,7 @@ int main(void) {
     if (!check_result("move_joint(low-follow)",
                       dual_arm_move_joint(api, DUAL_ARM_GROUP_LEFT_ARM,
                                           target_10_deg, joint_count, 0, 0,
-                                          0))) {
+                                          0, 0))) {
         example_velocity_guard_stop(&velocity_guard);
         dual_arm_control_api_destroy(api);
         return 1;
@@ -266,7 +266,7 @@ int main(void) {
         fill_constant(target, joint_count,
                       (10.0F + 10.0F * ratio) * kDegToRad);
         const dual_arm_ret_code_t code = dual_arm_move_joint(
-            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 0, 0);
+            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 0, 0, 0);
         if (code != DUAL_ARM_RET_SUCCESS) {
             check_result("move_joint(high-follow, direct)", code);
             example_velocity_guard_stop(&velocity_guard);
@@ -307,7 +307,7 @@ int main(void) {
         fill_constant(target, joint_count,
                       (20.0F - 20.0F * ratio) * kDegToRad);
         const dual_arm_ret_code_t code = dual_arm_move_joint(
-            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 2, 999);
+            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 2, 999, 0);
         if (code != DUAL_ARM_RET_SUCCESS) {
             check_result("move_joint(high-follow, 1 Hz filter)", code);
             example_velocity_guard_stop(&velocity_guard);

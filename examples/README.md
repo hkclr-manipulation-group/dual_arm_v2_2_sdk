@@ -1,6 +1,6 @@
 # SDK 示例程序
 
-C++ 与 C 示例分别位于 **`examples/cpp/`** 与 **`examples/c/`**，示教数据在 **`examples/data/`**。
+C++ 与 C 示例分别位于 **`examples/cpp/`** 与 **`examples/c/`**，Python 示例在 **`examples/python/`**，示教数据在 **`examples/data/`**。
 
 可执行文件输出到：
 
@@ -77,6 +77,26 @@ export DUAL_ARM_CONFIG_PREFIX=/path/to/cuarm_configuration/dual_v2_2
 ```
 
 C++ 示例还支持命令行首参传入配置目录（见 `config_path_from_args`）。
+
+---
+
+## Python
+
+先打开 Python 绑定再编译（见 [`python/README.md`](../python/README.md)）。示例与 C++ 一样接收配置目录作为首参，也会读 `DUAL_ARM_CONFIG_PREFIX`。
+
+```bash
+PYTHONPATH=build/python python3 examples/python/go_home.py
+PYTHONPATH=build/python python3 examples/python/move_line.py
+PYTHONPATH=build/python python3 examples/python/teach.py
+PYTHONPATH=build/python python3 examples/python/test_move_joint_speed.py
+```
+
+| 脚本 | 说明 |
+| --- | --- |
+| `go_home.py` | 双臂回零，头部保持当前角度 |
+| `move_line.py` | 左臂末端 z 增加 5 cm 后返回 |
+| `teach.py` | 重力补偿示教，输入 `s` 记录关节角 |
+| `test_move_joint_speed.py` | 单臂按多个 `speed_ratio` 走到可调目标角再返回 |
 
 ---
 

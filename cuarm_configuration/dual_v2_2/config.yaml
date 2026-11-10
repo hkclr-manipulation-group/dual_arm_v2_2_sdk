@@ -9,7 +9,7 @@ panel:
     interpolation: Cos
     target_type: Position
     actuator_mode: Position
-    acc_time: 5
+    acc_time: 0
     vel_time: 1
     none_interpolation_saturation_adjust: 0.15
   disable_display:

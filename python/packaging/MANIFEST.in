@@ -1,0 +1,2 @@
+recursive-include dual_arm_v2_2_sdk *
+include README.md

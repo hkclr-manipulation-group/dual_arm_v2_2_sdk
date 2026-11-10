@@ -104,7 +104,7 @@ static int move_and_report(dual_arm_control_api_t* api, dual_arm_group_t group,
                            const float* left_target, const float* right_target,
                            size_t joint_count, const char* label) {
     printf("\n==> %s\n", label);
-    if (dual_arm_move_joint(api, group, command, command_count, 0, 0, 0) !=
+    if (dual_arm_move_joint(api, group, command, command_count, 0, 0, 0, 0) !=
         DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "move_joint failed\n");
         return 0;

@@ -115,7 +115,7 @@ static int send_variable_frequency_trajectory(
 
         const dual_arm_ret_code_t code = dual_arm_move_joint(
             api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1,
-            trajectory_mode, radio);
+            trajectory_mode, radio, 0);
         if (code != DUAL_ARM_RET_SUCCESS) {
             fprintf(stderr, "%s send failed: %s\n", label,
                     dual_arm_ret_code_name(code));
@@ -214,7 +214,7 @@ int main(void) {
     }
 
     code = dual_arm_move_joint(api, DUAL_ARM_GROUP_LEFT_ARM, target_10,
-                               joint_count, 0, 0, 0);
+                               joint_count, 0, 0, 0, 0);
     printf("move_joint(low-follow): %s (the call only waits for command "
            "acknowledgement)\n",
            dual_arm_ret_code_name(code));
@@ -250,7 +250,7 @@ int main(void) {
         return 0;
     }
     code = dual_arm_move_joint(api, DUAL_ARM_GROUP_LEFT_ARM, target_10,
-                               joint_count, 0, 0, 0);
+                               joint_count, 0, 0, 0, 0);
     printf("move_joint(low-follow reset): %s\n", dual_arm_ret_code_name(code));
     if (code != DUAL_ARM_RET_SUCCESS ||
         !wait_until_target(api, &guard, target_10, joint_count, 20)) {

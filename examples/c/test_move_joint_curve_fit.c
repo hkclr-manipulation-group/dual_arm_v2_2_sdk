@@ -181,7 +181,7 @@ static int move_low_follow(dual_arm_control_api_t* api,
                            const char* label, int timeout_seconds) {
     printf("%s\n", label);
     const dual_arm_ret_code_t code = dual_arm_move_joint(
-        api, DUAL_ARM_GROUP_LEFT_ARM, target, target_count, 0, 0, 0);
+        api, DUAL_ARM_GROUP_LEFT_ARM, target, target_count, 0, 0, 0, 0);
     printf("  move_joint(low-follow): %s\n", dual_arm_ret_code_name(code));
     return code == DUAL_ARM_RET_SUCCESS &&
            wait_until_target(api, guard, target, target_count, timeout_seconds,
@@ -198,7 +198,7 @@ static int move_curve_fit_single(dual_arm_control_api_t* api,
            acc_time);
 
     const dual_arm_ret_code_t code = dual_arm_move_joint(
-        api, DUAL_ARM_GROUP_LEFT_ARM, target, target_count, 1, 1, radio);
+        api, DUAL_ARM_GROUP_LEFT_ARM, target, target_count, 1, 1, radio, 0);
     if (code != DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "  move_joint(curve-fit): %s\n",
                 dual_arm_ret_code_name(code));
@@ -236,7 +236,7 @@ static int stream_curve_fit_waypoints(
         float target[kMaxJoints];
         j1_offset_target(home_pose, joint_count, waypoints_deg[index], target);
         const dual_arm_ret_code_t code = dual_arm_move_joint(
-            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 1, radio);
+            api, DUAL_ARM_GROUP_LEFT_ARM, target, joint_count, 1, 1, radio, 0);
         if (code != DUAL_ARM_RET_SUCCESS) {
             fprintf(stderr, "  waypoint %zu/%zu send failed: %s\n", index + 1,
                     waypoint_count, dual_arm_ret_code_name(code));

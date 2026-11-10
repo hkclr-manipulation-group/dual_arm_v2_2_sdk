@@ -9,6 +9,8 @@
 
 **配置路径**：构造时传入 `cuarm_configuration/dual_v2_2` 目录（含 `config.yaml`）。
 
+**Python**：同一套 `ControlApi`，见 [第 14 节](#14-python)。
+
 ---
 
 ## 1. 概述
@@ -123,7 +125,8 @@ RetCode move_joint(Group group,
                    const std::vector<float>& joints,
                    bool follow = false,
                    uint8_t trajectory_mode = 0,
-                   uint16_t radio = 0);
+                   uint16_t radio = 0,
+                   uint16_t speed_ratio = 0);
 ```
 
 | 参数 | 说明 |
@@ -133,18 +136,19 @@ RetCode move_joint(Group group,
 | `follow` | `true` 高跟随；`false` 低跟随（quintic 单点） |
 | `trajectory_mode` | 仅 `follow=true` 时有效，见下表 |
 | `radio` | 曲线拟合 / 滤波平滑系数 |
+| `speed_ratio` | 仅 `follow=false` 时有效。`0` 使用 100% 关节速度软限位；`1..100` 按百分比缩放该限位。大于 100 返回 `CONTROLLER_ERROR`。高跟随忽略此参数 |
 
 **行为**：
 
 - 未选中的 arm 组保持**当前反馈位姿**（`hold_unselected_groups`）
-- `follow=true`：**非阻塞**，发包后立即返回，调用方须维持 **≤10 ms** 发包周期。高跟随没有“这一段走完”的事件，不能阻塞到位
-- `follow=false`：先等控制器 ACK（约 200 ms），再阻塞到各指令关节反馈与目标差 **≤ 0.01°** 且连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`；跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
+- `follow=true`：**非阻塞**，发包后立即返回，调用方须维持 **≤10 ms** 发包周期。高跟随没有“这一段走完”的事件，不能阻塞到位。`speed_ratio` 不改变线上的速度比例（仍为 1）
+- `follow=false`：先等控制器 ACK（约 200 ms），再阻塞到各指令关节反馈与目标差 **≤ 0.01°** 且连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`；跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`。计划时长仍是 `config.yaml` 的 `panel.general.acc_time`；`speed_ratio` 只降低允许的峰值速度。路程大、`acc_time` 放不下时，规划器按缩放后的软限位把时间拉长
 
 ### 高跟随模式映射
 
 | `follow` | `trajectory_mode` | rt_control 模式 | 插值 | `radio` 范围与作用 |
 |----------|-------------------|-----------------|------|-------------------|
-| `false` | — | `kSinglePoint` | `kQuintic` | 低跟随，acc_time 来自 `config.yaml` |
+| `false` | — | `kSinglePoint` | `kQuintic` | 低跟随。时长为 `config.yaml` 的 `acc_time`；峰值速度上限为软限位 × `speed_ratio/100`（`speed_ratio=0` 即 ×1） |
 | `true` | `0` | `kSinglePoint` | `kDirect` | 完全透传 |
 | `true` | `1` | `kSinglePoint` | `kQuintic` | **0..100**，越大曲线拟合越平滑（acc_time ≈ 10 ms..1.01 s） |
 | `true` | `2` | `kRawSinglePoint` | `kNone` + 低通 | **0..999**，截止频率对数映射 20 Hz..1 Hz |
@@ -155,7 +159,7 @@ RetCode move_joint(Group group,
 cutoff_hz = 20 * (1/20)^(radio/999)
 ```
 
-C：`dual_arm_move_joint(api, group, joints, joint_count, follow, trajectory_mode, radio)`。
+C：`dual_arm_move_joint(api, group, joints, joint_count, follow, trajectory_mode, radio, speed_ratio)`。高跟随传 `speed_ratio = 0`。
 
 ---
 
@@ -623,3 +627,36 @@ C 结构体：`dual_arm_gripper_state_t { position, force, speed }` + `dual_arm_
 | 夹爪量纲 | 范围 `???` | 0..1000 及物理映射已定义 |
 | `set_joint_max_acc` | 与 max_speed 类似 | **仅本地缓存，未下发** |
 | `State::ERROR` | 草案省略 | 已实现 |
+
+---
+
+## 14. Python
+
+Python 模块 `dual_arm_v2_2_sdk` 用 pybind11 绑定本页的 C++ `ControlApi`。方法名和参数与 C++ 相同，调用前不需要再包一层。
+
+```python
+import dual_arm_v2_2_sdk as sdk
+
+api = sdk.ControlApi("/path/to/cuarm_configuration/dual_v2_2")  # 含 config.yaml 的目录
+api.set_group(sdk.Group.LEFT_ARM, True)
+code, joints = api.get_joint(sdk.Group.LEFT_ARM)   # (RetCode, list[float])，单位 rad
+code, pose = api.get_tool_pose(sdk.Group.LEFT_ARM) # 7 个数：x, y, z, qw, qx, qy, qz
+api.move_joint(sdk.Group.LEFT_ARM, joints, False, 0, 0, 30)  # speed_ratio = 30
+```
+
+| C++ | Python |
+|-----|--------|
+| `std::vector<float>` | `list[float]` |
+| `std::tuple<RetCode, std::vector<...>>` | `(RetCode, list)` |
+| `get_gripper_state` 的 `unordered_map` | `(RetCode, dict)` |
+| `Group` / `RetCode` / `State` | `sdk.Group` / `sdk.RetCode` / `sdk.State` |
+
+阻塞调用（`move_joint(follow=False)`、`move_line`、夹爪阻塞、示教）会放开 GIL。`set_joint_max_acc` 没有导出：它只写 SDK 本地缓存，加速度请改 `config.yaml`。
+
+构建与安装见 [`python/README.md`](../python/README.md)。示例：
+
+```bash
+PYTHONPATH=build/python python3 examples/python/go_home.py
+PYTHONPATH=build/python python3 examples/python/move_line.py
+PYTHONPATH=build/python python3 examples/python/teach.py
+```

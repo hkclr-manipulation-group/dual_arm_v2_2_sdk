@@ -46,11 +46,15 @@ public:
 
     // Low follow (follow=false): send one quintic point, then block until each
     // commanded joint is within 0.01 deg for 3 samples, or TIMEOUT at 20 s.
-    // High follow (follow=true) returns after the packet is sent so the caller
-    // can keep a <=10 ms cadence. It does not wait for the arm to arrive.
+    // speed_ratio 0 keeps the full joint-velocity soft limit; 1..100 scales
+    // that limit. Above 100 returns CONTROLLER_ERROR. acc_time from config.yaml
+    // is still the planned duration when it fits under the scaled limit.
+    // High follow (follow=true) ignores speed_ratio and returns after the
+    // packet is sent so the caller can keep a <=10 ms cadence. It does not
+    // wait for the arm to arrive.
     RetCode move_joint(Group group, const std::vector<float>& joints,
                        bool follow = false, uint8_t trajectory_mode = 0,
-                       uint16_t radio = 0);
+                       uint16_t radio = 0, uint16_t speed_ratio = 0);
 
     // Cartesian line move (MoveL), matching dual_arm_sdk moveToolLine / kTaskLine.
     // target_tool_pose layout per arm: x, y, z (m), qw, qx, qy, qz — same frame as

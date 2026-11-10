@@ -74,7 +74,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (dual_arm_move_joint(api, DUAL_ARM_GROUP_ALL, all, all_count, 0, 0,
-                            0) != DUAL_ARM_RET_SUCCESS) {
+                            0, 0) != DUAL_ARM_RET_SUCCESS) {
         fprintf(stderr, "move_joint failed\n");
         dual_arm_control_api_destroy(api);
         return 1;

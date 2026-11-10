@@ -188,7 +188,7 @@ static int move_arm_low_follow(dual_arm_control_api_t* api,
     }
     if (!check_result(label, dual_arm_move_joint(api, DUAL_ARM_GROUP_LEFT_ARM,
                                                  joints, joint_count, 0, 0,
-                                                 0))) {
+                                                 0, 0))) {
         return 0;
     }
     return wait_until_joint_target(api, guard, joints, joint_count,

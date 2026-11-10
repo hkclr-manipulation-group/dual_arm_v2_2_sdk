@@ -1,4 +1,8 @@
 build/
+build_*/
+whl_build/
 .cache/
 examples/data/
 **/encoder_last_position.bin
+**/__pycache__/
+*.py[cod]
