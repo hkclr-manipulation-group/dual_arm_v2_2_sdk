@@ -89,6 +89,8 @@ PYTHONPATH=build/python python3 examples/python/go_home.py
 PYTHONPATH=build/python python3 examples/python/move_line.py
 PYTHONPATH=build/python python3 examples/python/teach.py
 PYTHONPATH=build/python python3 examples/python/test_move_joint_speed.py
+PYTHONPATH=build/python python3 examples/python/dual_two_control_api.py --left movel --right hold
+PYTHONPATH=build/python python3 examples/python/dual_two_control_sequence.py
 ```
 
 | 脚本 | 说明 |
@@ -97,6 +99,8 @@ PYTHONPATH=build/python python3 examples/python/test_move_joint_speed.py
 | `move_line.py` | 左臂末端 z 增加 5 cm 后返回 |
 | `teach.py` | 重力补偿示教，输入 `s` 记录关节角 |
 | `test_move_joint_speed.py` | 单臂按多个 `speed_ratio` 走到可调目标角再返回 |
+| `dual_two_control_api.py` | 两个 ControlApi 并行测试 MoveJ / MoveL / 静止，与 `dual_two_control_api.cpp` 同一套参数 |
+| `dual_two_control_sequence.py` | 按固定九步依次执行左右臂 MoveJ / MoveL / 静止组合 |
 
 ---
 

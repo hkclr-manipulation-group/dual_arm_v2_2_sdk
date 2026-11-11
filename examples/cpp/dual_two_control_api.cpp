@@ -6,7 +6,7 @@
  * 默认关节角和工具系增量与 examples/cpp/test_movel.cpp 相同。
  *
  * 用法：
- *   ./dual_two_control_api <config_left> <config_right>
+ *   ./dual_two_control_api [config_left config_right]
  *       [--left  movej|movel|hold] [--right movej|movel|hold]
  *       [--joints-left  j1,j2,j3,j4,j5,j6,j7]
  *       [--joints-right j1,j2,j3,j4,j5,j6,j7]
@@ -47,6 +47,10 @@ using example::wait_for_joint_state;
 namespace {
 
 constexpr int kStateTimeoutMs = 5000;
+constexpr const char* kDefaultLeftConfig =
+    "/home/delia/dual_arm/cuarm_panel_control_left/cuarm_configuration/dual_v2_2";
+constexpr const char* kDefaultRightConfig =
+    "/home/delia/dual_arm/cuarm_panel_control_right/cuarm_configuration/dual_v2_2";
 
 // 与 test_movel.cpp 相同。
 constexpr float kDefaultJointsDeg[7] = {103.512F, -17.218F, -29.020F, 95.323F,
@@ -336,7 +340,9 @@ void run_arm(ArmJob job, const MotionLimits& limits, StartGate& gate,
 void print_usage(const char* argv0) {
     std::cerr
         << "Usage: " << argv0
-        << " <config_left> <config_right> [options]\n"
+        << " [config_left config_right] [options]\n"
+        << "  config_left                  default " << kDefaultLeftConfig << "\n"
+        << "  config_right                 default " << kDefaultRightConfig << "\n"
         << "  --left  movej|movel|hold     default movej, commands LEFT_ARM\n"
         << "  --right movej|movel|hold     default movej, commands RIGHT_ARM\n"
         << "  --joints-left/--joints-right j1..j7 degrees\n"
@@ -433,9 +439,18 @@ bool parse_args(int argc, char* argv[], ArmJob& left, ArmJob& right, MotionLimit
             positionals.push_back(arg);
         }
     }
-    if (help_only || positionals.size() != 2) {
+    if (help_only) {
         print_usage(argv[0]);
-        return help_only && positionals.empty();
+        return positionals.empty();
+    }
+    if (positionals.empty()) {
+        left.config_prefix = kDefaultLeftConfig;
+        right.config_prefix = kDefaultRightConfig;
+        return true;
+    }
+    if (positionals.size() != 2) {
+        print_usage(argv[0]);
+        return false;
     }
     left.config_prefix = positionals[0];
     right.config_prefix = positionals[1];
