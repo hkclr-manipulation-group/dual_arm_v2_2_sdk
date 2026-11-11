@@ -34,8 +34,8 @@ arm:
         velocity: [100, 100, 100, 150, 150, 150, 150]
         torque:   [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0]
       task_motion_limit:
-        linear_velocity:  [0.2, 0.2, 0.2]               # in m/s, x, y, z
-        angular_velocity: [20, 20, 20]                  # in deg/s 
+        linear_velocity:  [0.1, 0.1, 0.1]               # in m/s, x, y, z
+        angular_velocity: [60, 60, 60]                  # in deg/s 
     force_control:
       gravity:
         ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
@@ -133,8 +133,8 @@ arm:
         velocity: [100, 100, 100, 150, 150, 150, 150]
         torque:   [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0]
       task_motion_limit:
-        linear_velocity:  [0.2, 0.2, 0.2]
-        angular_velocity: [20, 20, 20]
+        linear_velocity:  [0.1, 0.1, 0.1]
+        angular_velocity: [60, 60, 60]
     force_control:
       gravity:
         ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
