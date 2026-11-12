@@ -39,7 +39,7 @@ constexpr float kTaskOriEpsRad = 1e-4F;
 constexpr float kTaskOriEpsDeg = kTaskOriEpsRad * kRadToDeg;
 // Feedback "arrived" window. Packet ACK is not arrival: quintic keeps running
 // after the planner echoes the sequence.
-constexpr float kJointReachTolRad = 0.01F * kDegToRad;
+constexpr float kJointReachTolRad = 0.5F * kDegToRad;
 constexpr float kToolPosReachTolM = 0.0005F;
 constexpr float kToolRotReachTolRad = 0.01F * kDegToRad;
 constexpr int kReachStableCycles = 3;

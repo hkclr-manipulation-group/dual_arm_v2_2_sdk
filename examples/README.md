@@ -91,6 +91,7 @@ PYTHONPATH=build/python python3 examples/python/teach.py
 PYTHONPATH=build/python python3 examples/python/test_move_joint_speed.py
 PYTHONPATH=build/python python3 examples/python/dual_two_control_api.py --left movel --right hold
 PYTHONPATH=build/python python3 examples/python/dual_two_control_sequence.py
+PYTHONPATH=build/python python3 examples/python/blueberry_pick.py
 ```
 
 | 脚本 | 说明 |
@@ -101,6 +102,7 @@ PYTHONPATH=build/python python3 examples/python/dual_two_control_sequence.py
 | `test_move_joint_speed.py` | 单臂按多个 `speed_ratio` 走到可调目标角再返回 |
 | `dual_two_control_api.py` | 两个 ControlApi 并行测试 MoveJ / MoveL / 静止，与 `dual_two_control_api.cpp` 同一套参数 |
 | `dual_two_control_sequence.py` | 按固定九步依次执行左右臂 MoveJ / MoveL / 静止组合 |
+| `blueberry_pick.py` | 单臂采摘：init → sensing → MoveL 往返 → place，分段计时 |
 
 ---
 
