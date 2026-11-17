@@ -22,6 +22,10 @@ using dual_arm_v2_2_sdk::RetCode;
 using example::config_path_from_args;
 using example::wait_for_joint_state;
 
+namespace {
+constexpr uint16_t kJointSpeedRatio = 30;  // move_joint soft-limit scale: 1..100 (%)
+}
+
 int main(int argc, char* argv[]) {
     // 做法 A 也可直接在代码里写绝对路径，例如：
     // ControlApi api("/home/delia/dual_arm/cuarm_panel_control/dual_arm_v2_2_sdk_rev/cuarm_configuration/dual_v2_2");
@@ -53,11 +57,13 @@ int main(int argc, char* argv[]) {
     all.insert(all.end(), head.begin(), head.end());
     all.insert(all.end(), zero.begin(), zero.end());
 
-    if (api.move_joint(Group::ALL, all, false) != RetCode::SUCCESS) {
+    if (api.move_joint(Group::ALL, all, false, 0, 0, kJointSpeedRatio) !=
+        RetCode::SUCCESS) {
         std::cerr << "move_joint failed\n";
         return 1;
     }
 
-    std::cout << "Both arms moving to home (arm joints zero, head unchanged)\n";
+    std::cout << "Both arms moving to home (arm joints zero, head unchanged) at "
+              << kJointSpeedRatio << "% speed\n";
     return 0;
 }

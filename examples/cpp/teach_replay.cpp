@@ -49,6 +49,7 @@ using example::wait_for_joint_state;
 namespace {
 
 constexpr float kMaxSpeedDegS = 50.0F;
+constexpr uint16_t kJointSpeedRatio = 30;  // move_joint soft-limit scale: 1..100 (%)
 constexpr float kPositionToleranceDeg = 0.5F;
 constexpr int kReachTimeoutSeconds = 10;
 constexpr int kMaxReachAttempts = 3;
@@ -215,7 +216,8 @@ bool move_both_arms(ControlApi& api, const std::vector<float>& left_target,
     all.insert(all.end(), head_hold.begin(), head_hold.end());
     all.insert(all.end(), right_target.begin(), right_target.end());
 
-    const RetCode code = api.move_joint(Group::ALL, all, false);
+    const RetCode code =
+        api.move_joint(Group::ALL, all, false, 0, 0, kJointSpeedRatio);
     if (code != RetCode::SUCCESS) {
         std::cerr << "move_joint(ALL): " << ret_code_name(code) << '\n';
         return false;
@@ -297,7 +299,8 @@ int main(int argc, char* argv[]) {
             !configure_arm_speed(api, Group::RIGHT_ARM, left_current.size())) {
             return 1;
         }
-        std::cout << "Joint max speed set to " << kMaxSpeedDegS << " deg/s\n";
+        std::cout << "Joint max speed set to " << kMaxSpeedDegS << " deg/s, move_joint "
+                  << kJointSpeedRatio << "%\n";
 
         const std::vector<TeachPoint> points = load_teach_points(teach_file);
         std::cout << "Loaded " << points.size() << " point(s) from "

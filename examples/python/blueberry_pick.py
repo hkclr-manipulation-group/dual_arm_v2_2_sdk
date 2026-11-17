@@ -38,11 +38,11 @@ DRPY_DEG = [0.0, 0.0, 0.0]
 # 每段速度。joint_speed / line_speed 为 move_joint / move_line 的 speed_ratio（0..100）。
 # line_acc 为 move_line 的 acc_time（秒）；0 表示用 config.yaml。
 SEGMENT_SPEEDS = {
-    "to_init": {"joint_speed": 100},
-    "to_sensing": {"joint_speed": 100},
-    "movel_out": {"line_speed": 100, "line_acc": 0.0},
-    "back_to_sensing": {"joint_speed": 50},
-    "to_place": {"joint_speed": 100},
+    "to_init": {"joint_speed": 30},
+    "to_sensing": {"joint_speed": 30},
+    "movel_out": {"line_speed": 30, "line_acc": 0.0},
+    "back_to_sensing": {"joint_speed": 30},
+    "to_place": {"joint_speed": 30},
 }
 
 ARMS = {
