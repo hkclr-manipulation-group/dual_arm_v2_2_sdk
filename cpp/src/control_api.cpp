@@ -45,6 +45,7 @@ constexpr float kToolRotReachTolRad = 0.01F * kDegToRad;
 constexpr int kReachStableCycles = 3;
 constexpr int kReachPollMs = 20;
 constexpr int kMotionReachTimeoutMs = 20000;
+constexpr int kJointReachTimeoutMs = 30000;
 constexpr uint32_t kMotionFaultMask =
     DiagnosticFlags::kFaultPosHardLimitReached |
     DiagnosticFlags::kFaultVelHardLimitReached |
@@ -399,18 +400,71 @@ struct ControlApi::Impl {
     }
 
     bool wait_for_ack(uint32_t sequence, uint64_t generation_before_send,
-                      int timeout_ms = kAckTimeoutMs) const {
+                      int timeout_ms = kAckTimeoutMs,
+                      PlannerState* acknowledged = nullptr) const {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
         while (std::chrono::steady_clock::now() < deadline) {
-            if (state_generation.load() > generation_before_send &&
-                state_snapshot().received_sequence_id >= sequence)
-                return true;
+            if (state_generation.load() > generation_before_send) {
+                const PlannerState snapshot = state_snapshot();
+                if (snapshot.received_sequence_id >= sequence) {
+                    if (acknowledged) {
+                        if (snapshot.received_sequence_id != sequence) return false;
+                        *acknowledged = snapshot;
+                    }
+                    return true;
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         return false;
     }
 
+    RetCode plan_result_code() const {
+        const PlannerState snapshot = state_snapshot();
+        if (snapshot.plan_result == PlanResult::kTargetOutOfRange)
+            return RetCode::TARGET_OUT_OF_RANGE;
+        return RetCode::SUCCESS;
+    }
+
+    RetCode joint_soft_limit_check(const std::vector<int>& arm_indices,
+                                   const std::vector<float>& joints) const {
+        size_t source = 0;
+        for (int arm : arm_indices) {
+            if (arm < 0 || arm >= static_cast<int>(joint_sizes.size()))
+                return RetCode::CONTROLLER_ERROR;
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint) {
+                if (source >= joints.size()) return RetCode::CONTROLLER_ERROR;
+                const float q = joints[source++];
+                const float q_min = command.arm_soft_limit_position[arm][joint][0];
+                const float q_max = command.arm_soft_limit_position[arm][joint][1];
+                if (!std::isfinite(q) || q < q_min || q > q_max) {
+                    std::cerr << "Joint soft limit: arm " << arm << " J" << joint + 1
+                              << " target " << (q * kRadToDeg) << " deg, allowed ["
+                              << (q_min * kRadToDeg) << ", " << (q_max * kRadToDeg)
+                              << "] deg\n";
+                    return RetCode::TARGET_OUT_OF_RANGE;
+                }
+            }
+        }
+        if (source != joints.size()) return RetCode::CONTROLLER_ERROR;
+        return RetCode::SUCCESS;
+    }
+
+    RetCode joint_soft_limit_check_cached_all_arms() const {
+        std::vector<int> arms;
+        std::vector<float> joints;
+        arms.reserve(command.ArmSize);
+        for (int arm = 0; arm < command.ArmSize; ++arm) {
+            arms.push_back(arm);
+            for (int joint = 0; joint < joint_sizes[arm]; ++joint)
+                joints.push_back(joint_target_cache[arm][joint]);
+        }
+        return joint_soft_limit_check(arms, joints);
+    }
+
     RetCode motion_fault(const std::vector<int>& arm_indices) const {
+        const RetCode plan_code = plan_result_code();
+        if (plan_code != RetCode::SUCCESS) return plan_code;
         const PlannerState snapshot = state_snapshot();
         if (snapshot.system_state == SystemState::kError ||
             (snapshot.system_diagnostic_flags & kMotionFaultMask) != 0)
@@ -465,10 +519,11 @@ struct ControlApi::Impl {
 
     template <typename Reached>
     RetCode wait_until_reached(const std::vector<int>& arm_indices,
-                               Reached reached) const {
+                               Reached reached,
+                               int timeout_ms = kMotionReachTimeoutMs) const {
         const auto deadline =
             std::chrono::steady_clock::now() +
-            std::chrono::milliseconds(kMotionReachTimeoutMs);
+            std::chrono::milliseconds(timeout_ms);
         int stable = 0;
         while (std::chrono::steady_clock::now() < deadline) {
             const RetCode fault = motion_fault(arm_indices);
@@ -651,6 +706,20 @@ struct ControlApi::Impl {
         clear_arm_target_dirty();
     }
 
+    RetCode wait_for_joint_command_ack(uint32_t sequence, uint64_t generation_before_send) {
+        PlannerState acknowledged{};
+        const bool received = wait_for_ack(sequence, generation_before_send,
+                                           kAckTimeoutMs, &acknowledged);
+        const RetCode result = !received ? RetCode::TIMEOUT :
+            acknowledged.plan_result == PlanResult::kTargetOutOfRange ?
+                RetCode::TARGET_OUT_OF_RANGE : RetCode::SUCCESS;
+        if (result != RetCode::SUCCESS) {
+            hold_unselected_groups({});
+            sync_joint_target_cache_from_command();
+        }
+        return result;
+    }
+
     bool ensure_joint_target_cache() {
         if (joint_target_cache_valid) return true;
         if (!received_state.load()) return false;
@@ -748,6 +817,9 @@ struct ControlApi::Impl {
 
         hold_unflushed_groups_in_cache(sticky_left_right);
         apply_joint_motion_profile(follow, trajectory_mode, radio);
+        const RetCode limit = joint_soft_limit_check_cached_all_arms();
+        if (limit != RetCode::SUCCESS) return limit;
+
         for (int arm = 0; arm < command.ArmSize; ++arm)
             for (int joint = 0; joint < joint_sizes[arm]; ++joint)
                 command.JointCmd[arm][joint] = joint_target_cache[arm][joint];
@@ -757,14 +829,14 @@ struct ControlApi::Impl {
         const uint64_t generation_before_send = state_generation.load();
         if (!send_once()) return RetCode::SEND_FAILED;
         command.reset_interpolation = false;
+        if (!follow) {
+            const RetCode result = wait_for_joint_command_ack(sequence, generation_before_send);
+            if (result != RetCode::SUCCESS) return result;
+        }
         previous_follow = follow;
         previous_trajectory_mode = trajectory_mode;
         clear_arm_target_dirty();
-
-        if (follow) return RetCode::SUCCESS;
-        return wait_for_ack(sequence, generation_before_send)
-                   ? RetCode::SUCCESS
-                   : RetCode::TIMEOUT;
+        return RetCode::SUCCESS;
     }
 
     void clear_task_cmd() {
@@ -1097,6 +1169,9 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
     if (!follow && speed_ratio > 100) return RetCode::CONTROLLER_ERROR;
     if (!impl_->received_state.load()) return RetCode::RECEIVE_FAILED;
 
+    const RetCode limit = impl_->joint_soft_limit_check(indices, joints);
+    if (limit != RetCode::SUCCESS) return limit;
+
     impl_->apply_joint_motion_profile(follow, trajectory_mode, radio, speed_ratio);
     impl_->hold_unselected_groups(indices);
     size_t source = 0;
@@ -1109,17 +1184,19 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
     const uint64_t generation_before_send = impl_->state_generation.load();
     if (!impl_->send_once()) return RetCode::SEND_FAILED;
     impl_->command.reset_interpolation = false;
+    if (!follow) {
+        const RetCode plan = impl_->wait_for_joint_command_ack(sequence, generation_before_send);
+        if (plan != RetCode::SUCCESS) return plan;
+    }
     impl_->previous_follow = follow;
     impl_->previous_trajectory_mode = trajectory_mode;
     impl_->sync_joint_target_cache_from_command();
 
     // High-follow calls must remain non-blocking so the caller can maintain <=10 ms cadence.
     if (follow) return RetCode::SUCCESS;
-    if (!impl_->wait_for_ack(sequence, generation_before_send))
-        return RetCode::TIMEOUT;
     return impl_->wait_until_reached(indices, [&] {
         return impl_->joints_reached(indices, joints);
-    });
+    }, kJointReachTimeoutMs);
 }
 
 RetCode ControlApi::set_joint_target(Group group,

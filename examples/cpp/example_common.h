@@ -102,6 +102,7 @@ inline const char* ret_code_name(dual_arm_v2_2_sdk::RetCode code) {
         case RetCode::RECEIVE_FAILED: return "RECEIVE_FAILED";
         case RetCode::PARSE_FAILED: return "PARSE_FAILED";
         case RetCode::TIMEOUT: return "TIMEOUT";
+        case RetCode::TARGET_OUT_OF_RANGE: return "TARGET_OUT_OF_RANGE";
     }
     return "UNKNOWN";
 }

@@ -142,7 +142,7 @@ RetCode move_joint(Group group,
 
 - 未选中的 arm 组保持**当前反馈位姿**（`hold_unselected_groups`）
 - `follow=true`：**非阻塞**，发包后立即返回，调用方须维持 **≤10 ms** 发包周期。高跟随没有“这一段走完”的事件，不能阻塞到位。`speed_ratio` 不改变线上的速度比例（仍为 1）
-- `follow=false`：先等控制器 ACK（约 200 ms），再阻塞到各指令关节反馈与目标差 **≤ 0.01°** 且连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`；跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`。计划时长仍是 `config.yaml` 的 `panel.general.acc_time`；`speed_ratio` 只降低允许的峰值速度。路程大、`acc_time` 放不下时，规划器按缩放后的软限位把时间拉长
+- `follow=false`：先等控制器 ACK（约 200 ms），再阻塞到各指令关节反馈与目标差 **≤ 0.5°** 且连续 3 次（20 ms 采样）。30 s 内未到位返回 `TIMEOUT`；跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`。计划时长仍是 `config.yaml` 的 `panel.general.acc_time`；`speed_ratio` 只降低允许的峰值速度。路程大、`acc_time` 放不下时，规划器按缩放后的软限位把时间拉长
 
 ### 高跟随模式映射
 

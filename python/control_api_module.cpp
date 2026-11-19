@@ -37,6 +37,7 @@ PYBIND11_MODULE(dual_arm_v2_2_sdk, m) {
         .value("RECEIVE_FAILED", RetCode::RECEIVE_FAILED)
         .value("PARSE_FAILED", RetCode::PARSE_FAILED)
         .value("TIMEOUT", RetCode::TIMEOUT)
+        .value("TARGET_OUT_OF_RANGE", RetCode::TARGET_OUT_OF_RANGE)
         .export_values();
 
     py::enum_<State>(m, "State")

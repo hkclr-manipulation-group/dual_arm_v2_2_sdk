@@ -231,6 +231,8 @@ cutoff_hz = 20 * (1 / 20)^(radio / 999)
 | 测试 | `test_arm_gripper_safe` | 臂+夹爪安全流程 |
 | 测试 | `test_control_api_various_command_frequency` | 高跟随频率对比 |
 
+`teach_replay` 使用的关节位置单点命令在 `rt_control` 中整包预检：任一参与臂的已配置墙检失败，左右臂和头部都不执行该包，阻塞式 SDK 调用返回 `TARGET_OUT_OF_RANGE`。拒绝不取消之前已接受的轨迹，也不是急停。墙检按配置对名义关节路径采样，检查的是关节原点，不覆盖连杆或工具外形；未配置墙的臂不做平面检查。此行为不覆盖 `kRawSinglePoint`、多路点或 MoveL。
+
 ---
 
 ## 文档

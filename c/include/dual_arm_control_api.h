@@ -25,6 +25,7 @@ typedef enum {
     DUAL_ARM_RET_RECEIVE_FAILED = -2,
     DUAL_ARM_RET_PARSE_FAILED = -3,
     DUAL_ARM_RET_TIMEOUT = -4,
+    DUAL_ARM_RET_TARGET_OUT_OF_RANGE = -5,
 } dual_arm_ret_code_t;
 
 typedef enum {

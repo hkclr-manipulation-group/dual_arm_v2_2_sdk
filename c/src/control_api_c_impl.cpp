@@ -104,6 +104,8 @@ extern "C" const char* dual_arm_ret_code_name(dual_arm_ret_code_t code) {
             return "PARSE_FAILED";
         case DUAL_ARM_RET_TIMEOUT:
             return "TIMEOUT";
+        case DUAL_ARM_RET_TARGET_OUT_OF_RANGE:
+            return "TARGET_OUT_OF_RANGE";
     }
     return "UNKNOWN";
 }

@@ -176,28 +176,17 @@ bool move_single_joint(ControlApi& api, Group arm, int joint_index,
     target[static_cast<std::size_t>(joint_index)] +=
         delta_deg * kDegToRad;
 
-    const auto min_limit = api.get_joint_min_limit(arm);
-    const auto max_limit = api.get_joint_max_limit(arm);
-    if (min_limit.size() == target.size() &&
-        max_limit.size() == target.size()) {
-        const float q = target[static_cast<std::size_t>(joint_index)];
-        const float q_min = min_limit[static_cast<std::size_t>(joint_index)];
-        const float q_max = max_limit[static_cast<std::size_t>(joint_index)];
-        if (q < q_min || q > q_max) {
-            std::cerr << step_label << ": target J" << joint_index + 1
-                      << " = " << q * kRadToDeg << " deg is outside soft limit ["
-                      << q_min * kRadToDeg << ", " << q_max * kRadToDeg
-                      << "] deg\n";
-            return false;
-        }
-    }
-
     std::cout << "\n==> " << step_label << '\n';
     std::cout << "    " << group_name(arm) << " J" << joint_index + 1
               << " command delta: " << std::showpos << delta_deg << std::noshowpos
               << " deg\n";
 
     const RetCode code = api.move_joint(arm, target, false);
+    if (code == RetCode::TARGET_OUT_OF_RANGE) {
+        std::cerr << step_label << ": move_joint rejected (soft limit or planner): "
+                  << ret_code_name(code) << '\n';
+        return false;
+    }
     if (code != RetCode::SUCCESS) {
         std::cerr << "move_joint failed: " << ret_code_name(code) << '\n';
         return false;

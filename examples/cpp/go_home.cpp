@@ -13,6 +13,7 @@
 #include "control_api.h"
 #include "example_common.h"
 
+#include <chrono>
 #include <iostream>
 #include <vector>
 
@@ -57,13 +58,16 @@ int main(int argc, char* argv[]) {
     all.insert(all.end(), head.begin(), head.end());
     all.insert(all.end(), zero.begin(), zero.end());
 
-    if (api.move_joint(Group::ALL, all, false, 0, 0, kJointSpeedRatio) !=
-        RetCode::SUCCESS) {
-        std::cerr << "move_joint failed\n";
+    const auto started = std::chrono::steady_clock::now();
+    const RetCode code = api.move_joint(Group::ALL, all, false, 0, 0, kJointSpeedRatio);
+    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started);
+    if (code != RetCode::SUCCESS) {
+        std::cerr << "move_joint(ALL) failed: " << example::ret_code_name(code)
+                  << " (" << static_cast<int>(code) << ") after " << elapsed.count() << " s\n";
         return 1;
     }
 
-    std::cout << "Both arms moving to home (arm joints zero, head unchanged) at "
-              << kJointSpeedRatio << "% speed\n";
+    std::cout << "Both arms reached home (arm joints zero, head unchanged) in "
+              << elapsed.count() << " s at " << kJointSpeedRatio << "% speed\n";
     return 0;
 }
