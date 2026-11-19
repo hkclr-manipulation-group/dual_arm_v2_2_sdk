@@ -26,6 +26,7 @@ enum class RetCode : int {
     PARSE_FAILED = -3,
     TIMEOUT = -4,
     TARGET_OUT_OF_RANGE = -5,
+    LINEAR_PATH_FAILED = -6,
 };
 
 enum class State : uint8_t {

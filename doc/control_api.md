@@ -63,6 +63,8 @@ C 对应：`dual_arm_group_t`（`DUAL_ARM_GROUP_*`）。
 | `-2` | `RECEIVE_FAILED` | 未收到有效状态或接收失败 |
 | `-3` | `PARSE_FAILED` | 返回值解析失败 |
 | `-4` | `TIMEOUT` | 等待控制器确认或运动到位超时（低跟随 `move_joint` / `move_line` / 阻塞夹爪） |
+| `-5` | `TARGET_OUT_OF_RANGE` | 关节软限位或平面墙检查失败 |
+| `-6` | `LINEAR_PATH_FAILED` | MoveL 的目标或路径采样点逆运动学求解失败 |
 
 C 对应：`dual_arm_ret_code_t`（`DUAL_ARM_RET_*`）。  
 辅助函数：`dual_arm_ret_code_name()`、`dual_arm_control_api_last_error()`。
@@ -187,6 +189,7 @@ std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
 - 未参与运动的 arm：`TaskCmdDeg = 0`（保持不动）
 - `motion_type = kTaskLine`。控制器 ACK 之后继续阻塞，直到各指令臂末端与目标的位置差 **≤ 0.5 mm**、姿态差 **≤ 0.01°**，并连续 3 次（20 ms 采样）。20 s 内未到位返回 `TIMEOUT`。跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
 - **关节 streaming 或 Tool MoveL auto flush 激活时**返回 `CONTROLLER_ERROR`
+- MoveL 任一采样点越过配置的平面墙，返回 `TARGET_OUT_OF_RANGE (-5)`；逆运动学求解失败，返回 `LINEAR_PATH_FAILED (-6)`。SDK 收到规划失败后立即返回，不等待 20 秒。
 
 C：
 

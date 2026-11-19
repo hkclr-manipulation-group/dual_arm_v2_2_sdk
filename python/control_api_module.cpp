@@ -38,6 +38,7 @@ PYBIND11_MODULE(dual_arm_v2_2_sdk, m) {
         .value("PARSE_FAILED", RetCode::PARSE_FAILED)
         .value("TIMEOUT", RetCode::TIMEOUT)
         .value("TARGET_OUT_OF_RANGE", RetCode::TARGET_OUT_OF_RANGE)
+        .value("LINEAR_PATH_FAILED", RetCode::LINEAR_PATH_FAILED)
         .export_values();
 
     py::enum_<State>(m, "State")

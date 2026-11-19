@@ -419,10 +419,11 @@ struct ControlApi::Impl {
         return false;
     }
 
-    RetCode plan_result_code() const {
-        const PlannerState snapshot = state_snapshot();
-        if (snapshot.plan_result == PlanResult::kTargetOutOfRange)
+    static RetCode plan_result_code(PlanResult result, bool task_line) {
+        if (result == PlanResult::kTargetOutOfRange)
             return RetCode::TARGET_OUT_OF_RANGE;
+        if (task_line && result == PlanResult::kLinearPathFailed)
+            return RetCode::LINEAR_PATH_FAILED;
         return RetCode::SUCCESS;
     }
 
@@ -462,10 +463,10 @@ struct ControlApi::Impl {
         return joint_soft_limit_check(arms, joints);
     }
 
-    RetCode motion_fault(const std::vector<int>& arm_indices) const {
-        const RetCode plan_code = plan_result_code();
-        if (plan_code != RetCode::SUCCESS) return plan_code;
+    RetCode motion_fault(const std::vector<int>& arm_indices, bool task_line) const {
         const PlannerState snapshot = state_snapshot();
+        const RetCode plan_code = plan_result_code(snapshot.plan_result, task_line);
+        if (plan_code != RetCode::SUCCESS) return plan_code;
         if (snapshot.system_state == SystemState::kError ||
             (snapshot.system_diagnostic_flags & kMotionFaultMask) != 0)
             return RetCode::CONTROLLER_ERROR;
@@ -520,13 +521,14 @@ struct ControlApi::Impl {
     template <typename Reached>
     RetCode wait_until_reached(const std::vector<int>& arm_indices,
                                Reached reached,
-                               int timeout_ms = kMotionReachTimeoutMs) const {
+                               int timeout_ms = kMotionReachTimeoutMs,
+                               bool task_line = false) const {
         const auto deadline =
             std::chrono::steady_clock::now() +
             std::chrono::milliseconds(timeout_ms);
         int stable = 0;
         while (std::chrono::steady_clock::now() < deadline) {
-            const RetCode fault = motion_fault(arm_indices);
+            const RetCode fault = motion_fault(arm_indices, task_line);
             if (fault != RetCode::SUCCESS) return fault;
             if (reached()) {
                 if (++stable >= kReachStableCycles) return RetCode::SUCCESS;
@@ -593,7 +595,7 @@ struct ControlApi::Impl {
         return state_snapshot().received_sequence_id == command.sequence_id - 1;
     }
 
-    RetCode send_task_with_ack() {
+    RetCode send_task_with_ack(bool report_line_failure = false) {
         if (command.actuator_mode != last_actuator_mode_ ||
             static_cast<MotionControl>(command.motion_type) !=
                 last_motion_type_ ||
@@ -605,6 +607,7 @@ struct ControlApi::Impl {
             std::max(1, static_cast<int>(receive_dt_us_ * 2.0F / 1000.0F));
         int elapsed_ms = 0;
         bool need_send = true;
+        RetCode plan_code = RetCode::SUCCESS;
 
         while (elapsed_ms < kTaskAckTimeoutMs && need_send) {
             synchronize_sequence_with_planner();
@@ -625,6 +628,8 @@ struct ControlApi::Impl {
                 } else if (snapshot.setting_update_finished &&
                            snapshot.received_sequence_id ==
                                command.sequence_id - 1) {
+                    if (report_line_failure)
+                        plan_code = plan_result_code(snapshot.plan_result, true);
                     need_send = false;
                     break;
                 }
@@ -638,7 +643,7 @@ struct ControlApi::Impl {
             elapsed_ms += wait_ms;
         }
 
-        return need_send ? RetCode::TIMEOUT : RetCode::SUCCESS;
+        return need_send ? RetCode::TIMEOUT : plan_code;
     }
 
     void hold_all_groups_at_current_position() {
@@ -1028,7 +1033,8 @@ struct ControlApi::Impl {
     RetCode send_task_line_command(const std::vector<int>& arm_indices,
                                    const std::vector<float>& target_tool_pose,
                                    uint16_t speed_ratio,
-                                   float acc_time) {
+                                   float acc_time,
+                                   bool& sent_motion) {
         if (!received_state.load()) return RetCode::RECEIVE_FAILED;
         if (target_tool_pose.size() !=
             arm_indices.size() * static_cast<size_t>(kToolPoseSize)) {
@@ -1043,8 +1049,9 @@ struct ControlApi::Impl {
 
         const std::vector<int> all_tool_arms = {0, 2};
         if (task_delta_near_zero(all_tool_arms)) return RetCode::SUCCESS;
+        sent_motion = true;
         tool_stream_profile_initialized = false;
-        return send_task_with_ack();
+        return send_task_with_ack(true);
     }
 
     void switch_target_type(ControlType target_type, ControlType actuator_mode) {
@@ -1130,12 +1137,13 @@ RetCode ControlApi::move_line(Group group,
     if (arm_indices.empty()) return RetCode::CONTROLLER_ERROR;
     if (target_tool_pose.size() != impl_->expected_tool_pose_count(group))
         return RetCode::CONTROLLER_ERROR;
+    bool sent_motion = false;
     const RetCode sent = impl_->send_task_line_command(
-        arm_indices, target_tool_pose, speed_ratio, acc_time);
+        arm_indices, target_tool_pose, speed_ratio, acc_time, sent_motion);
     if (sent != RetCode::SUCCESS) return sent;
     return impl_->wait_until_reached(arm_indices, [&] {
         return impl_->tool_pose_reached(arm_indices, target_tool_pose);
-    });
+    }, kMotionReachTimeoutMs, sent_motion);
 }
 
 std::tuple<RetCode, std::vector<float>>
