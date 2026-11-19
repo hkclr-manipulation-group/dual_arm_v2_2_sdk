@@ -115,8 +115,8 @@ def timed_move_joint(api, group, joints, speed_ratio, name, timings):
     return check(code, name)
 
 
-def print_tool_pose_delta_mm(api, group, target_pose, label):
-    """超时后打印目标位姿与当前 get_tool_pose 的位置差（mm）：Δ = target − feedback。"""
+def print_tool_pose_error(api, group, target_pose, label):
+    """超时后打印位置差（mm）和目标到反馈的最短旋转角（deg）。"""
     code, current = api.get_tool_pose(group)
     if code != sdk.RetCode.SUCCESS or len(current) < 3 or len(target_pose) < 3:
         log_err = f"[{label}] TIMEOUT: get_tool_pose -> {code_name(code)}"
@@ -125,9 +125,18 @@ def print_tool_pose_delta_mm(api, group, target_pose, label):
     dx_mm = (target_pose[0] - current[0]) * 1000.0
     dy_mm = (target_pose[1] - current[1]) * 1000.0
     dz_mm = (target_pose[2] - current[2]) * 1000.0
+    target_quat = target_pose[3:7]
+    current_quat = current[3:7]
+    rotation_error = "N/A"
+    if len(target_quat) == len(current_quat) == 4:
+        norm_product = math.hypot(*target_quat) * math.hypot(*current_quat)
+        if math.isfinite(norm_product) and norm_product > 1.0e-12:
+            dot = sum(target * actual for target, actual in zip(target_quat, current_quat))
+            angle_deg = math.degrees(2.0 * math.acos(min(1.0, abs(dot) / norm_product)))
+            rotation_error = f"{angle_deg:.4f} deg"
     print(
         f"[{label}] TIMEOUT: Δx={dx_mm:.3f} mm Δy={dy_mm:.3f} mm Δz={dz_mm:.3f} mm "
-        f"(movel_target − get_tool_pose)",
+        f"姿态误差={rotation_error} (movel_target − get_tool_pose)",
         file=sys.stderr,
     )
 
@@ -142,7 +151,7 @@ def timed_move_line(api, group, pose, line_speed, line_acc, name, timings):
     elapsed = time.monotonic() - t0
     timings.add(name, elapsed)
     if code == sdk.RetCode.TIMEOUT:
-        print_tool_pose_delta_mm(api, group, pose, name)
+        print_tool_pose_error(api, group, pose, name)
     return check(code, name)
 
 

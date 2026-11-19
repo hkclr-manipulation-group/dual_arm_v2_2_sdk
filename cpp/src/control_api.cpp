@@ -44,8 +44,7 @@ constexpr float kToolPosReachTolM = 0.0005F;
 constexpr float kToolRotReachTolRad = 0.01F * kDegToRad;
 constexpr int kReachStableCycles = 3;
 constexpr int kReachPollMs = 20;
-constexpr int kMotionReachTimeoutMs = 20000;
-constexpr int kJointReachTimeoutMs = 30000;
+constexpr int kMotionReachTimeoutMs = 30000;
 constexpr uint32_t kMotionFaultMask =
     DiagnosticFlags::kFaultPosHardLimitReached |
     DiagnosticFlags::kFaultVelHardLimitReached |
@@ -521,11 +520,10 @@ struct ControlApi::Impl {
     template <typename Reached>
     RetCode wait_until_reached(const std::vector<int>& arm_indices,
                                Reached reached,
-                               int timeout_ms = kMotionReachTimeoutMs,
                                bool task_line = false) const {
         const auto deadline =
             std::chrono::steady_clock::now() +
-            std::chrono::milliseconds(timeout_ms);
+            std::chrono::milliseconds(kMotionReachTimeoutMs);
         int stable = 0;
         while (std::chrono::steady_clock::now() < deadline) {
             const RetCode fault = motion_fault(arm_indices, task_line);
@@ -1143,7 +1141,7 @@ RetCode ControlApi::move_line(Group group,
     if (sent != RetCode::SUCCESS) return sent;
     return impl_->wait_until_reached(arm_indices, [&] {
         return impl_->tool_pose_reached(arm_indices, target_tool_pose);
-    }, kMotionReachTimeoutMs, sent_motion);
+    }, sent_motion);
 }
 
 std::tuple<RetCode, std::vector<float>>
@@ -1204,7 +1202,7 @@ RetCode ControlApi::move_joint(Group group, const std::vector<float>& joints,
     if (follow) return RetCode::SUCCESS;
     return impl_->wait_until_reached(indices, [&] {
         return impl_->joints_reached(indices, joints);
-    }, kJointReachTimeoutMs);
+    });
 }
 
 RetCode ControlApi::set_joint_target(Group group,
