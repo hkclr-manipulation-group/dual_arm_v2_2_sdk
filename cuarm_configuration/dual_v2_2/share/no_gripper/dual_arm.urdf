@@ -7,7 +7,7 @@
     <child link="arm_base_link_l"/>
   </joint>
   <joint name="J0_r" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="1 0 0" rpy="0 0 3.141592653589793"/>
     <parent link="world"/>
     <child link="arm_base_link_r"/>
   </joint>

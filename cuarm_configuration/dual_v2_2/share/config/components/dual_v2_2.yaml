@@ -24,7 +24,7 @@ arm:
       joint_hard_limit:                                 # Program terminates if exceed
         position: [[-185.0, -90.0, -185.0, -45.0, -185.0, -95.0, -185.0], [185.0, 90.0, 185.0, 145.0, 185.0, 95.0, 185.0]]
         velocity: [130, 130, 130, 180, 180, 180, 180]
-        torque:   [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+        torque:   [100, 100, 100, 100, 100, 100, 100]
       joint_follow:                                     # Program terminates if exceed
         position: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
         velocity: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
@@ -40,7 +40,14 @@ arm:
         axis: 0
         sign: -1
         offset: 0.5
-        margin: 0.08
+        margin: 0.05
+        tool_cylinders:
+          gripper:
+            end_from_ee: [0.0, 0.0, 0.20]
+            radius: 0.02
+          camera_bracket:
+            end_from_ee: [-0.15, 0.0, 0.0]
+            radius: 0.03
     force_control:
       gravity:
         ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
@@ -61,7 +68,7 @@ arm:
     joint_size: 2
     urdf_joints: ["H1j", "H2j"]
     urdf_links: ["H1", "H2"]
-    enable_joint: [true, true]
+    enable_joint: [false, false]
     pid:
       pos_vel_kp: [3.0, 3.0]
       pos_tor_kp: [0.0, 0.0]
@@ -128,7 +135,7 @@ arm:
       joint_hard_limit:
         position: [[-185.0, -90.0, -185.0, -45.0, -185.0, -95.0, -185.0], [185.0, 90.0, 185.0, 145.0, 185.0, 95.0, 185.0]]
         velocity: [130, 130, 130, 180, 180, 180, 180]
-        torque:   [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+        torque:   [100, 100, 100, 100, 100, 100, 100]
       joint_follow:
         position: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
         velocity: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
@@ -143,8 +150,15 @@ arm:
       separating_plane:
         axis: 0
         sign: 1
-        offset: 0.3
-        margin: 0.08
+        offset: 0.5
+        margin: 0.05
+        tool_cylinders:
+          gripper:
+            end_from_ee: [0.0, 0.0, 0.20]
+            radius: 0.02
+          camera_bracket:
+            end_from_ee: [-0.15, 0.0, 0.0]
+            radius: 0.03
     force_control:
       gravity:
         ratio: [0.1, 0.1, 0.1, 0.35, 0.1, 0.1, 0.1]
