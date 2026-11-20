@@ -33,8 +33,8 @@ inline std::string default_config_path() {
     }
     const fs::path exe_dir = executable_directory();
     const std::vector<fs::path> candidates = {
-        exe_dir / ".." / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
-        exe_dir / ".." / ".." / "cuarm_configuration" / "dual_v2_2",
+        exe_dir / ".." / ".." / ".." / "cuarm_configuration" / "dual_v2_1",
+        exe_dir / ".." / ".." / "cuarm_configuration" / "dual_v2_1",
     };
     for (const auto& dir : candidates) {
         std::error_code ec;

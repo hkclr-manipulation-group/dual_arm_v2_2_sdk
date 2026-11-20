@@ -389,6 +389,12 @@ struct ControlApi::Impl {
 
     bool send_once() {
         try {
+            {
+                // The planner applies this field on every new command.
+                std::lock_guard<std::mutex> lock(state_mutex);
+                for (int arm = 0; arm < std::min(command.ArmSize, state.ArmSize); ++arm)
+                    std::copy_n(state.tool_offset[arm], 3, command.tool_offset[arm]);
+            }
             command.send_timestamp = get_time_now();
             udp->send(&command);
             ++command.sequence_id;
@@ -594,6 +600,8 @@ struct ControlApi::Impl {
     }
 
     RetCode send_task_with_ack(bool report_line_failure = false) {
+        const bool reset_task_base = command.motion_type == MotionControl::kTaskLine &&
+            (last_motion_type_ != MotionControl::kTaskLine || command.reset_control_mem);
         if (command.actuator_mode != last_actuator_mode_ ||
             static_cast<MotionControl>(command.motion_type) !=
                 last_motion_type_ ||
@@ -618,6 +626,15 @@ struct ControlApi::Impl {
                 const PlannerState snapshot = state_snapshot();
                 if (command.need_setting_update) {
                     if (snapshot.received_sequence_id == command.sequence_id - 1) {
+                        if (reset_task_base) {
+                            // Use feedback from the settings ACK, when the planner
+                            // captured the origin for the next relative MoveL.
+                            for (int arm = 0; arm < command.ArmSize; ++arm) {
+                                if (!movel_target_valid_[arm]) continue;
+                                fill_task_line_delta(command.TaskCmdDeg[arm], snapshot.ToolPose[arm],
+                                                     movel_target_tool_pose_[arm]);
+                            }
+                        }
                         command.need_setting_update = false;
                         command.reset_interpolation = false;
                         command.reset_control_mem = false;
@@ -660,6 +677,13 @@ struct ControlApi::Impl {
     }
 
     RetCode apply_settings() {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(kAckTimeoutMs);
+        while (!received_state.load()) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return RetCode::RECEIVE_FAILED;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         command.need_setting_update = true;
         RetCode result = send_with_ack();
         if (result != RetCode::SUCCESS) return result;
@@ -929,7 +953,8 @@ struct ControlApi::Impl {
                 command.JointCmd[arm][joint] = snapshot.JointPos[arm][joint];
     }
 
-    void fill_task_line_deltas_from_tool_cache(const PlannerState& snapshot) {
+    void fill_task_line_deltas_from_tool_cache(const PlannerState& snapshot,
+                                              bool sticky_left_right) {
         clear_task_cmd();
         for (int arm = 0; arm < command.ArmSize; ++arm) {
             if (!is_tool_motion_arm(arm)) continue;
@@ -943,7 +968,7 @@ struct ControlApi::Impl {
                                  target_pose);
             for (int i = 0; i < kToolPoseSize; ++i)
                 movel_target_tool_pose_[arm][i] = target_pose[i];
-            movel_target_valid_[arm] = true;
+            movel_target_valid_[arm] = sticky_left_right || tool_target_dirty[arm];
         }
     }
 
@@ -975,7 +1000,7 @@ struct ControlApi::Impl {
                                  target_pose);
             for (int i = 0; i < kToolPoseSize; ++i)
                 movel_target_tool_pose_[arm][i] = target_pose[i];
-            movel_target_valid_[arm] = true;
+            movel_target_valid_[arm] = user_targets_arm;
         }
     }
 
@@ -985,7 +1010,7 @@ struct ControlApi::Impl {
 
         hold_unflushed_tool_targets_in_cache(sticky_left_right);
         const PlannerState snapshot = state_snapshot();
-        fill_task_line_deltas_from_tool_cache(snapshot);
+        fill_task_line_deltas_from_tool_cache(snapshot, sticky_left_right);
 
         const std::vector<int> all_tool_arms = {0, 2};
         if (task_delta_near_zero(all_tool_arms)) {

@@ -1,16 +1,18 @@
 name: gripperL
-type: UartServoTwoFingerGripper
+type: RmdCanGripper
 joint_size: 1
 urdf_joints: ["gripper_J1_l"]
 urdf_links: ["gripper_L1_l", "gripper_L2_l"]
 panel_display_joint_names: ["L_gripper"]
 offset_from_ee: [0.10, 0, 0]
 hardware:
-  com_id: "/dev/ttyUSB0"
-  servo_id: 2
-  servo_limit: [450, 3000]
+  motor_id: 8
+  can_device_index: 0
+  can_channel: 0
+  open_position_deg: -126.09
+  close_position_deg: -68.12
 safety:
-  joint_soft_limit: 
+  joint_soft_limit:
     position: [[0], [1]]
   joint_hard_limit:
     position: [[0], [1]]

@@ -37,13 +37,15 @@ rt_control:
   ip: 127.0.0.1
   port: 11201
   robotics_library: pinocchio
-  hardware_simulation: true
+  hardware_simulation: false
 curobo:
   import_yaml: curobo/no_gripper.yaml
   # import_yaml: curobo/with_gripper.yaml
   # import_yaml: curobo/left_hand_right_gripper.yaml
+  # import_yaml: curobo/left_library_gripper_right_library_gripper.yaml
 robot:
-  import_yaml: share/config/assembly/no_gripper_sdk_compat.yaml
+  # import_yaml: share/config/assembly/no_gripper_sdk_compat.yaml
   # import_yaml: share/config/assembly/no_gripper.yaml
   # import_yaml: share/config/assembly/with_gripper.yaml
   # import_yaml: share/config/assembly/left_hand_right_gripper.yaml
+  import_yaml: share/config/assembly/left_library_gripper_right_library_gripper.yaml
