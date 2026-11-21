@@ -39,8 +39,8 @@ rt_control:
   robotics_library: pinocchio
   hardware_simulation: false
 curobo:
-  import_yaml: curobo/no_gripper.yaml
-  # import_yaml: curobo/with_gripper.yaml
+  # import_yaml: curobo/no_gripper.yaml
+  import_yaml: curobo/with_gripper.yaml
   # import_yaml: curobo/left_hand_right_gripper.yaml
   # import_yaml: curobo/left_library_gripper_right_library_gripper.yaml
 robot:
@@ -48,4 +48,4 @@ robot:
   # import_yaml: share/config/assembly/no_gripper.yaml
   # import_yaml: share/config/assembly/with_gripper.yaml
   # import_yaml: share/config/assembly/left_hand_right_gripper.yaml
-  import_yaml: share/config/assembly/left_library_gripper_right_library_gripper.yaml
+  import_yaml: share/config/assembly/with_gripper.yaml
