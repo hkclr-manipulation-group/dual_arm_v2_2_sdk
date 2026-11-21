@@ -52,7 +52,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="S1" type="revolute">
+  <joint name="S1j" type="revolute">
     <origin rpy="-1.5708 -1.5708 0" xyz="0 0 0"/>
     <parent link="S0"/>
     <child link="S1"/>
@@ -81,7 +81,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="S2" type="revolute">
+  <joint name="S2j" type="revolute">
     <origin rpy="0 0 0" xyz="0.325 0 0"/>
     <parent link="S1"/>
     <child link="S2"/>
@@ -110,7 +110,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="S3" type="revolute">
+  <joint name="S3j" type="revolute">
     <origin rpy="0 0 1.5708" xyz="0.325 0 0"/>
     <parent link="S2"/>
     <child link="S3"/>
@@ -139,7 +139,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="S4" type="revolute">
+  <joint name="S4j" type="revolute">
     <origin rpy="1.5708 0 0" xyz="0 -0.172 0"/>
     <parent link="S3"/>
     <child link="S4"/>
@@ -168,7 +168,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="H1" type="revolute">
+  <joint name="H1j" type="revolute">
     <origin rpy="0.0035172 0.30647 0.011658" xyz="0.0025322 0 0.54659"/>
     <parent link="S4"/>
     <child link="H1"/>
@@ -197,7 +197,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="H2" type="revolute">
+  <joint name="H2j" type="revolute">
     <origin rpy="-1.5708 0 0" xyz="0 0 0"/>
     <parent link="H1"/>
     <child link="H2"/>
