@@ -80,5 +80,6 @@ PYTHONPATH="$PWD/build/python" python3 -c 'import dual_arm_v2_2_sdk as sdk; prin
 | `python/package_wheel.sh: No such file or directory` | 当前目录通常是 `build/`。回到 SDK 根目录再执行脚本。 |
 | 找不到 `build/python` 或匹配的扩展 `.so` | 确认已启用 `DUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON`，并使用同一 `python3` 构建和打包。 |
 | `auditwheel` 或 `patchelf: command not found` | 激活安装了打包工具的虚拟环境，并确认两个命令都在 `PATH` 中。 |
+| `SDK needs libyaml-cpp.so... but it was not found` | 激活编译 SDK 时使用的 Conda 环境，或用 `YAML_CPP_SO=/path/to/libyaml-cpp.so ./python/package_wheel.sh 1.0.0 build/` 指定同一份动态库。 |
 | `pip` 找不到 `.whl` 文件 | 先看打包是否成功，再从 SDK 根目录检查 `whl_build/wheelhouse/`。不要用上次残留的旧 wheel。 |
 | 导入后只有 `RetCode.TIMEOUT` 等旧错误码 | 用上面的导入命令检查实际加载位置，确认新版已经重编译或重新安装。 |

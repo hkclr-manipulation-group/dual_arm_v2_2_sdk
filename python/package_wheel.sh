@@ -31,7 +31,23 @@ SDK_SO="$(find "$BUILD_DIR/lib" -name 'libdual_arm_v2_2_control_sdk.so.*.*.*' -t
 YAML_NEEDED="$(readelf -d "$SDK_SO" | awk '/NEEDED/ && /yaml-cpp/ {gsub(/[\[\]]/, "", $NF); print $NF; exit}')"
 YAML_SO=""
 if [ -n "$YAML_NEEDED" ]; then
-    YAML_SO="${YAML_CPP_SO:-$(ldconfig -p | awk -v name="$YAML_NEEDED" '$1 == name {print $NF; exit}')}"
+    YAML_SO="${YAML_CPP_SO:-}"
+    if [ -z "$YAML_SO" ]; then
+        # Resolve the SDK's original RUNPATH before checking the system cache.
+        YAML_SO="$(ldd "$SDK_SO" 2>/dev/null | awk -v name="$YAML_NEEDED" '
+            $1 == name && $2 == "=>" && $3 ~ /^\// {
+                sub(/^[^>]+>[[:space:]]*/, "")
+                sub(/[[:space:]]+\(0x[[:xdigit:]]+\)$/, "")
+                print
+                exit
+            }' || true)"
+        if [ ! -f "$YAML_SO" ] && [ -n "${CONDA_PREFIX:-}" ]; then
+            YAML_SO="$CONDA_PREFIX/lib/$YAML_NEEDED"
+        fi
+        if [ ! -f "$YAML_SO" ]; then
+            YAML_SO="$(ldconfig -p | awk -v name="$YAML_NEEDED" '$1 == name && !found {print $NF; found = 1}')"
+        fi
+    fi
     [ -n "$YAML_SO" ] && [ -f "$YAML_SO" ] || { echo "SDK needs $YAML_NEEDED but it was not found; set YAML_CPP_SO" >&2; exit 1; }
 fi
 SDK_SONAME="$(basename "$SDK_SO" | sed -E 's/(\.so\.[0-9]+).*/\1/')"
@@ -49,7 +65,8 @@ cp "$EXT_SO" "$PKG/"
 # Ship one file under the SONAME. A wheel stores symlinks as full copies.
 cp "$SDK_SO" "$PKG/libs/$SDK_SONAME"
 if [ -n "$YAML_SO" ]; then
-    cp -L "$YAML_SO" "$PKG/libs/$(basename "$YAML_SO")"
+    echo "== vendoring $YAML_NEEDED from $YAML_SO"
+    cp -L "$YAML_SO" "$PKG/libs/$YAML_NEEDED"
 else
     echo "== yaml-cpp is static; not vendoring libyaml-cpp"
 fi
