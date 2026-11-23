@@ -1,6 +1,12 @@
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-find_package(pybind11 CONFIG QUIET)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmakedir
+    OUTPUT_VARIABLE _pybind11_cmake_dir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+find_package(pybind11 CONFIG QUIET HINTS "${_pybind11_cmake_dir}")
 if(NOT pybind11_FOUND)
     include(FetchContent)
     FetchContent_Declare(

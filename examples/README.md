@@ -15,10 +15,10 @@ C++ 与 C 示例分别位于 **`examples/cpp/`** 与 **`examples/c/`**，Python 
 ## 前置条件
 
 1. 启动 `rt_control`，加载本仓库 `cuarm_configuration/dual_v2_2/config.yaml`
-2. 编译 SDK：
+2. 编译 C / C++ 示例：
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=OFF
 cmake --build build -j
 cd build
 export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
@@ -82,16 +82,16 @@ C++ 示例还支持命令行首参传入配置目录（见 `config_path_from_arg
 
 ## Python
 
-先打开 Python 绑定再编译（见 [`python/README.md`](../python/README.md)）。示例与 C++ 一样接收配置目录作为首参，也会读 `DUAL_ARM_CONFIG_PREFIX`。
+按 [Python 构建与安装说明](../python/README.md) 安装 wheel，然后用同一个 `python3` 运行示例。支持指定配置目录的示例也会读取 `DUAL_ARM_CONFIG_PREFIX`。
 
 ```bash
-PYTHONPATH=build/python python3 examples/python/go_home.py
-PYTHONPATH=build/python python3 examples/python/move_line.py
-PYTHONPATH=build/python python3 examples/python/teach.py
-PYTHONPATH=build/python python3 examples/python/test_move_joint_speed.py
-PYTHONPATH=build/python python3 examples/python/dual_two_control_api.py --left movel --right hold
-PYTHONPATH=build/python python3 examples/python/dual_two_control_sequence.py
-PYTHONPATH=build/python python3 examples/python/blueberry_pick.py
+python3 examples/python/go_home.py
+python3 examples/python/move_line.py
+python3 examples/python/teach.py
+python3 examples/python/test_move_joint_speed.py
+python3 examples/python/dual_two_control_api.py --left movel --right hold
+python3 examples/python/dual_two_control_sequence.py
+python3 examples/python/blueberry_pick.py
 ```
 
 | 脚本 | 说明 |

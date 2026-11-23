@@ -1,6 +1,6 @@
 # Dual Arm V2.2 控制 SDK
 
-本仓库提供 **Dual Arm V2.2 的 C++ 与 C 客户端控制 API**。SDK 通过 UDP 与实时控制服务 `rt_control` 通信，向机器人下发运动与夹爪指令，并接收关节/夹爪状态反馈。
+本仓库提供 **Dual Arm V2.2 的 C++、C 与 Python 客户端控制 API**。SDK 通过 UDP 与实时控制服务 `rt_control` 通信，向机器人下发运动与夹爪指令，并接收关节/夹爪状态反馈。
 
 > **重要说明**：本仓库包含客户端 SDK、示例程序与 **`dual_v2_2` 运行时配置**（`cuarm_configuration/`）。实际驱动机器人还需要 **`cuarm_rt_control`**（生成 `dual_v2_2_rt_control` 可执行文件）。编译 SDK 依赖本仓库内的 **`robot_platform_utils`** 与 **`curi_udp`** 子模块。
 
@@ -126,7 +126,31 @@ git submodule update --init --recursive
 
 ## 快速开始
 
-### 1. 配置
+### 编译 C、C++、Python 并生成 wheel
+
+首次检出后，先初始化子模块、安装依赖并激活虚拟环境。具体命令见 [Python 构建与安装](python/README.md)。准备好后，从 SDK 根目录执行以下命令。
+
+```bash
+mkdir -p build &&
+cd build &&
+cmake .. &&
+make -j4 &&
+cd .. &&
+./python/package_wheel.sh 1.0.0 build/
+```
+
+如果已有的 `build/` 缓存了关闭 Python 的选项，在该目录执行一次 `cmake .. -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON`。
+
+wheel 在 `whl_build/wheelhouse/`。在同一个 Python 环境安装后，可直接用 `python3` 运行脚本。
+
+```bash
+python3 -m pip install --force-reinstall whl_build/wheelhouse/*.whl
+python3 examples/python/test_move_joint_speed.py --help
+```
+
+### 连接机器人并运行示例
+
+#### 1. 配置
 
 编辑本仓库 `cuarm_configuration/dual_v2_2/config.yaml`：
 
@@ -135,7 +159,7 @@ git submodule update --init --recursive
 
 确认 `panel.ip:port` 与 `rt_control.ip:port` 与运行环境一致（默认均为 `127.0.0.1`，端口 `11101` / `11201`）。
 
-### 2. 启动 rt_control
+#### 2. 启动 rt_control
 
 ```bash
 cd <workspace>/cuarm_rt_control/build
@@ -144,11 +168,11 @@ sudo ./dual_v2_2_rt_control
 sudo ./dual_v2_2_rt_control /path/to/dual_arm_v2_2_sdk/cuarm_configuration/dual_v2_2
 ```
 
-### 3. 编译并运行 SDK 示例
+#### 3. 编译并运行 C / C++ 示例
 
 ```bash
 cd dual_arm_v2_2_sdk
-cmake -S . -B build
+cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=OFF
 cmake --build build -j
 
 cd build
@@ -161,10 +185,10 @@ export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
 
 构建说明：
 
-- **禁止源码内构建**：请勿在仓库根目录直接 `cmake .`；始终使用 `-S . -B build`。
+- **源码外构建**。在 `build/` 中执行 `cmake ..`，或在 SDK 根目录执行 `cmake -S . -B build`。
 - **关闭 C++ 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES=OFF`
 - **关闭 C 示例**：`cmake -S . -B build -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF`
-- **Python 绑定**（默认关闭，仓库不附带 wheel）：在运行该绑定的机器上编译，x86_64 与 Jetson（aarch64）各编一次。依赖、CMake 选项和 `pip install` 见 [`python/README.md`](python/README.md)。编完可先 `PYTHONPATH=build/python python3 examples/python/teach.py`
+- **Python 绑定默认开启**。构建三套接口和 wheel 的依赖与命令见 [Python 构建与安装](python/README.md)。
 - **默认安装前缀**：`build/install`（`cmake --install build`）
 
 示例程序通过 [`examples/example_common.h`](examples/example_common.h) 中的 `default_config_path()` **按可执行文件位置**自动查找 `cuarm_configuration/dual_v2_2`，因此从 `build/` 或 `build/bin/` 启动都能找到配置。自定义布局时，可修改该函数，或在集成时向 `ControlApi` 传入绝对路径。
@@ -261,7 +285,7 @@ cutoff_hz = 20 * (1 / 20)^(radio / 999)
 
 ```bash
 cd dual_arm_v2_2_sdk
-cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/.local -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=OFF
 cmake --build build -j
 cmake --install build
 ```

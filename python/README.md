@@ -15,64 +15,62 @@ code, joints = api.get_joint(sdk.Group.LEFT_ARM)
 - 关节单位为弧度。末端位姿每臂 7 个数：`x, y, z, qw, qx, qy, qz`。
 - `set_joint_max_acc` 未导出。加速度写在 `config.yaml` 的 `robot.arm[].safety.joint_soft_limit.acceleration`。
 
-## 1. 在 SDK 根目录编译
+## 1. 从源码一次构建 C、C++、Python 和 wheel
 
-**下面的编译、打包和安装命令都在 SDK 根目录执行，不是在 `build/` 或 `examples/python/`。** SDK 根目录就是同时有 `CMakeLists.txt` 和 `python/package_wheel.sh` 的目录。如果当前提示符以 `dual_arm_v2_2_sdk_rev/build$` 结尾，先执行 `cd ..`。
-
-仓库不附带预编译的 wheel。建议在目标机器上编译，并用同一个 `python3` 编译、打包、安装和运行。x86_64 与 Jetson（aarch64）的产物不能混用；Python 扩展也要匹配解释器版本，例如 `cpython-310` 对应 CPython 3.10。
-
-依赖：
+在含 `CMakeLists.txt` 和 `python/package_wheel.sh` 的 SDK 根目录执行。首次检出时初始化子模块，安装构建工具。以下命令适用于 Ubuntu / Debian。
 
 ```bash
-sudo apt install -y build-essential cmake python3-dev libyaml-cpp-dev libeigen3-dev
-python3 -m pip install pybind11
+git submodule update --init --recursive
+sudo apt install -y build-essential cmake binutils libyaml-cpp-dev libeigen3-dev python3-dev python3-venv
+python3 -m venv build/venv
+source build/venv/bin/activate
+python3 -m pip install pybind11 'setuptools>=68' wheel build auditwheel patchelf
 ```
 
-在 SDK 根目录配置并编译：
+新建构建目录时，CMake 默认开启 Python 绑定和 C / C++ 示例。在 `build/` 中配置并编译，再回到 SDK 根目录打包。
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-      -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON \
-      -DDUAL_ARM_V2_2_SDK_BUILD_CPP_EXAMPLES=OFF \
-      -DDUAL_ARM_V2_2_SDK_BUILD_C_EXAMPLES=OFF \
-      -DPython3_EXECUTABLE="$(which python3)" \
-      -Dpybind11_DIR="$(python3 -m pybind11 --cmakedir)"
-cmake --build build --target dual_arm_v2_2_sdk -j2
+mkdir -p build &&
+cd build &&
+cmake .. &&
+make -j4 &&
+cd .. &&
+./python/package_wheel.sh 1.0.0 build/
 ```
 
-产物是 `build/python/dual_arm_v2_2_sdk.cpython-<版本>-<架构>-linux-gnu.so`。如果编译时内存不足，改用 `-j1`。
+| 产物 | 路径 |
+| --- | --- |
+| C / C++ 动态库 | `build/lib/` |
+| C / C++ 示例 | `build/bin/c/`、`build/bin/cpp/` |
+| Python 扩展 | `build/python/` |
+| 可安装的 wheel | `whl_build/wheelhouse/` |
 
-## 2. 选择运行方式
+内存不足时用 `make -j2` 或 `make -j1`。C / C++ 动态库、头文件和 CMake 包可在 `build/` 中用 `make install` 安装到 `build/install/`。
 
-### A. 不安装，直接用本地构建
+如果旧构建目录缓存了 `DUAL_ARM_V2_2_SDK_BUILD_PYTHON=OFF`，在该目录执行一次 `cmake .. -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON`。需要 Release 优化时，配置命令可加 `-DCMAKE_BUILD_TYPE=Release`。
 
-从 SDK 根目录执行下列命令，仅验证导入路径和错误码，不连接控制器，也不会让机械臂运动：
+## 2. 安装 wheel 后直接运行脚本
+
+在已激活的虚拟环境中安装并做离线验证：
 
 ```bash
-PYTHONPATH="$PWD/build/python" python3 -c 'import dual_arm_v2_2_sdk as sdk; print(sdk.__file__); print(sdk.RetCode.TARGET_OUT_OF_RANGE, sdk.RetCode.LINEAR_PATH_FAILED)'
+python3 -m pip install --force-reinstall whl_build/wheelhouse/dual_arm_v2_2_sdk-1.0.0-*.whl
+python3 -c 'import dual_arm_v2_2_sdk as sdk; print(sdk.__file__, sdk.__version__)'
+python3 examples/python/test_move_joint_speed.py --help
 ```
 
-输出应指向本仓库的 `build/python/`，而不是已安装的 `site-packages/`。运行 `examples/python/` 下的脚本时使用相同的 `PYTHONPATH` 前缀；如果已经进入 `examples/python/`，改用 `PYTHONPATH=../../build/python`。运动示例会下发指令，不要用它们验证是否加载了新版模块。
+分发时把 `whl_build/wheelhouse/` 里的 `.whl` 交给用户。用户在自己的 Python 环境里执行 `python3 -m pip install /path/to/文件名.whl`，之后用同一个 `python3` 运行脚本，无需设置 `PYTHONPATH`。新终端中需重新激活对应的虚拟环境。
 
-### B. 打 wheel 并安装
+wheel 的标签限定了 CPython 版本、CPU 架构和 Linux 兼容范围。比如 `cp310-cp310-manylinux_2_35_x86_64` 对应 CPython 3.10、x86_64 和 glibc 2.35 或更新的兼容系统。Jetson（aarch64）和其他 CPython 版本需要各自的 wheel。
 
-如果以后想直接 `import dual_arm_v2_2_sdk`，不再设置 `PYTHONPATH`，在 **SDK 根目录**运行：
+使用机器人时，还需另行提供含 `config.yaml` 的配置目录并启动 `rt_control`。如果要分发仓库示例，请一并交付 `examples/python/` 和所用的 `cuarm_configuration/dual_v2_2/`。
 
-```bash
-python3 -m pip install 'setuptools>=68' build auditwheel patchelf
-cmake --build build --target dual_arm_v2_2_sdk -j2 &&
-./python/package_wheel.sh 1.0.0 build &&
-python3 -m pip install --user --force-reinstall whl_build/wheelhouse/dual_arm_v2_2_sdk-1.0.0-*.whl
-```
+### 从构建目录临时导入
 
-- `1.0.0` 是 wheel 的版本；`build` 是已经编译好的构建目录，不是输出目录。打包脚本不编译 C++。
-- 新 wheel 在 **SDK 根目录的 `whl_build/wheelhouse/`**，不在 `build/whl_build/`。平台后缀由脚本生成，命令里的 `*` 不要加引号或反斜杠。
-- 改过 SDK 或 Python 绑定后，重复上面的「编译 → 打包 → 安装」。如果版本仍是 `1.0.0`，`--force-reinstall` 可确保替换旧包。在虚拟环境中安装时去掉 `--user`。
-
-安装后，不带 `PYTHONPATH` 验证：
+调试时可直接从构建目录导入 Python 扩展：
 
 ```bash
-env -u PYTHONPATH python3 -c 'import dual_arm_v2_2_sdk as sdk; print(sdk.__file__); print(sdk.RetCode.TARGET_OUT_OF_RANGE, sdk.RetCode.LINEAR_PATH_FAILED)'
+PYTHONPATH="$PWD/build/python" python3 -c 'import dual_arm_v2_2_sdk as sdk; print(sdk.__file__)'
 ```
 
 ## 常见问题
@@ -80,7 +78,7 @@ env -u PYTHONPATH python3 -c 'import dual_arm_v2_2_sdk as sdk; print(sdk.__file_
 | 现象 | 检查方法 |
 | --- | --- |
 | `python/package_wheel.sh: No such file or directory` | 当前目录通常是 `build/`。回到 SDK 根目录再执行脚本。 |
-| `missing build/python` 或找不到扩展 `.so` | 确认在 SDK 根目录，已启用 `DUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON` 并完成编译。 |
-| `auditwheel` 或 `patchelf: command not found` | 确认工具已安装，且工具所在目录在 `PATH` 中；用户级安装通常使用 `$HOME/.local/bin`。 |
+| 找不到 `build/python` 或匹配的扩展 `.so` | 确认已启用 `DUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON`，并使用同一 `python3` 构建和打包。 |
+| `auditwheel` 或 `patchelf: command not found` | 激活安装了打包工具的虚拟环境，并确认两个命令都在 `PATH` 中。 |
 | `pip` 找不到 `.whl` 文件 | 先看打包是否成功，再从 SDK 根目录检查 `whl_build/wheelhouse/`。不要用上次残留的旧 wheel。 |
 | 导入后只有 `RetCode.TIMEOUT` 等旧错误码 | 用上面的导入命令检查实际加载位置，确认新版已经重编译或重新安装。 |

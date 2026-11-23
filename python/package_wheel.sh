@@ -22,7 +22,9 @@ PKG="$STAGE/dual_arm_v2_2_sdk"
 
 [ -d "$BUILD_DIR/python" ] || { echo "missing $BUILD_DIR/python, configure with -DDUAL_ARM_V2_2_SDK_BUILD_PYTHON=ON" >&2; exit 1; }
 
-EXT_SO="$(ls "$BUILD_DIR"/python/dual_arm_v2_2_sdk.cpython-*.so)"
+EXT_SUFFIX="$(python3 -c 'from sysconfig import get_config_var; print(get_config_var("EXT_SUFFIX"))')"
+EXT_SO="$BUILD_DIR/python/dual_arm_v2_2_sdk$EXT_SUFFIX"
+[ -f "$EXT_SO" ] || { echo "missing $EXT_SO; build the binding with the python3 used to package it" >&2; exit 1; }
 SDK_SO="$(find "$BUILD_DIR/lib" -name 'libdual_arm_v2_2_control_sdk.so.*.*.*' -type f | head -1)"
 [ -f "$SDK_SO" ] || { echo "libdual_arm_v2_2_control_sdk.so.<version> not found in $BUILD_DIR/lib" >&2; exit 1; }
 # yaml-cpp is often archived into the SDK .so. Vendor it only when NEEDED.
@@ -37,7 +39,7 @@ SDK_SONAME="$(basename "$SDK_SO" | sed -E 's/(\.so\.[0-9]+).*/\1/')"
 echo "== staging $PKG (version $VERSION)"
 rm -rf "$STAGE"
 mkdir -p "$PKG/libs"
-cp "$HERE/packaging/pyproject.toml" "$HERE/packaging/MANIFEST.in" "$STAGE/"
+cp "$HERE/packaging/pyproject.toml" "$HERE/packaging/setup.py" "$HERE/packaging/MANIFEST.in" "$STAGE/"
 cp "$HERE/README.md" "$STAGE/README.md"
 cp "$HERE/packaging/dual_arm_v2_2_sdk/__init__.py" "$PKG/"
 cp "$HERE/packaging/dual_arm_v2_2_sdk/libs/__init__.py" "$PKG/libs/"
