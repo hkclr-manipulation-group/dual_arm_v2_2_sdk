@@ -38,16 +38,16 @@ arm:
         angular_velocity: [60, 60, 60]                  # in deg/s 
       # 六面墙与单面墙二选一：切换时注释当前整段，再取消另一段的注释。
       # 边界使用世界坐标 [X, Y, Z]，单位为米；修改后重启 rt_control。
-      workspace_box:
-        min: [-1.0, -0.3, 0.0]
-        max: [0.5, 1.0, 2.0]
-        margin: 0.05
-      # 仅保留中间墙 X = 0.50 m；含余量时左臂须满足 X <= 0.45 m。
-      # separating_plane:
-      #   axis: 0
-      #   sign: -1
-      #   offset: 0.50
+      # workspace_box:
+      #   min: [-1.0, -0.3, 0.0]
+      #   max: [0.5, 1.0, 2.0]
       #   margin: 0.05
+      # 中间墙 X = 0.50 m，含余量时左臂须满足 X <= 0.45 m。
+      separating_plane:
+        axis: 0
+        sign: -1
+        offset: 0.50
+        margin: 0.05
       # 两种墙模式共用工具包络，切换时保留此段。
       tool_cylinders:
         gripper:
@@ -157,16 +157,16 @@ arm:
         angular_velocity: [60, 60, 60]
       # 六面墙与单面墙二选一：切换时注释当前整段，再取消另一段的注释。
       # 边界使用世界坐标 [X, Y, Z]，单位为米；修改后重启 rt_control。
-      workspace_box:
-        min: [0.5, -0.3, 0.0]
-        max: [2.0, 1.0, 2.0]
-        margin: 0.05
-      # 仅保留中间墙 X = 0.50 m；含余量时右臂须满足 X >= 0.55 m。
-      # separating_plane:
-      #   axis: 0
-      #   sign: 1
-      #   offset: 0.50
+      # workspace_box:
+      #   min: [0.5, -0.3, 0.0]
+      #   max: [2.0, 1.0, 2.0]
       #   margin: 0.05
+      # 中间墙 X = 0.50 m，含余量时右臂须满足 X >= 0.55 m。
+      separating_plane:
+        axis: 0
+        sign: 1
+        offset: 0.50
+        margin: 0.05
       # 两种墙模式共用工具包络，切换时保留此段。
       tool_cylinders:
         gripper:
