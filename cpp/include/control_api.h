@@ -56,7 +56,7 @@ public:
     // wait for the arm to arrive.
     RetCode move_joint(Group group, const std::vector<float>& joints,
                        bool follow = false, uint8_t trajectory_mode = 0,
-                       uint16_t radio = 0, uint16_t speed_ratio = 0);
+                       uint16_t radio = 0, uint16_t speed_ratio = 50);
 
     // Cartesian line move (MoveL), matching dual_arm_sdk moveToolLine / kTaskLine.
     // target_tool_pose layout per arm: x, y, z (m), qw, qx, qy, qz — same frame as
