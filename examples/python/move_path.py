@@ -34,7 +34,8 @@ def main():
         parser.error(f"找不到配置文件：{args.config / 'config.yaml'}")
     config = str(args.config.resolve()) if args.config is not None else config_path([""])
 
-    group = sdk.Group.LEFT_ARM
+    # group = sdk.Group.LEFT_ARM
+    group = sdk.Group.RIGHT_ARM
     api = sdk.ControlApi(config)
     if wait_for_joints(api, group) is None:
         print("3 秒内没有收到左臂关节反馈，请检查 rt_control。", file=sys.stderr)
