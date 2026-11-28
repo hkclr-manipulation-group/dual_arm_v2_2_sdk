@@ -1,6 +1,6 @@
 """左臂末端位姿的 z 增加 5 cm，再回到原位。
 
-move_line 会阻塞到末端到位（0.5 mm / 0.01°），不用再轮询 get_tool_pose。
+move_line 会阻塞到末端到位（0.5 mm / 0.1°），不用再轮询 get_tool_pose。
 
 用法：
     python3 examples/python/move_line.py

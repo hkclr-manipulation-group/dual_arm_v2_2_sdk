@@ -627,11 +627,23 @@ struct ControlApi::Impl {
                 if (command.need_setting_update) {
                     if (snapshot.received_sequence_id == command.sequence_id - 1) {
                         if (reset_task_base) {
-                            // Use feedback from the settings ACK, when the planner
-                            // captured the origin for the next relative MoveL.
+                            // Live feedback can already have advanced past the latched origin.
                             for (int arm = 0; arm < command.ArmSize; ++arm) {
                                 if (!movel_target_valid_[arm]) continue;
-                                fill_task_line_delta(command.TaskCmdDeg[arm], snapshot.ToolPose[arm],
+                                const bool enabled = std::any_of(snapshot.enabled_joint[arm],
+                                    snapshot.enabled_joint[arm] + command.JointSize[arm],
+                                    [](bool joint_enabled) { return joint_enabled; });
+                                if (!report_line_failure && !enabled) continue;
+                                const auto& base = snapshot.move_l_base_pose[arm];
+                                if (!snapshot.move_l_base_valid[arm] ||
+                                    snapshot.move_l_base_sequence[arm] != snapshot.received_sequence_id ||
+                                    !std::all_of(base, base + kToolPoseSize,
+                                                 [](float value) { return std::isfinite(value); }) ||
+                                    std::hypot(std::hypot(base[3], base[4]),
+                                               std::hypot(base[5], base[6])) <= 1.0e-6f) {
+                                    return RetCode::CONTROLLER_ERROR;
+                                }
+                                fill_task_line_delta(command.TaskCmdDeg[arm], base,
                                                      movel_target_tool_pose_[arm]);
                             }
                         }

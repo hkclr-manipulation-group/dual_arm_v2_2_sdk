@@ -187,7 +187,7 @@ std::tuple<RetCode, std::vector<float>> get_tool_pose(Group group) const;
 
 - 从 `PlannerState::ToolPose` 读当前位姿，计算相对增量写入 `TaskCmdDeg`
 - 未参与运动的 arm：`TaskCmdDeg = 0`（保持不动）
-- `motion_type = kTaskLine`。控制器 ACK 之后继续阻塞，直到各指令臂末端与目标的位置差 **≤ 0.5 mm**、姿态差 **≤ 0.01°**，并连续 3 次（20 ms 采样）。30 s 内未到位返回 `TIMEOUT`。跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
+- `motion_type = kTaskLine`。控制器 ACK 之后继续阻塞，直到各指令臂末端与目标的位置差 **≤ 0.5 mm**、姿态差 **≤ 0.1°**，并连续 3 次（20 ms 采样）。30 s 内未到位返回 `TIMEOUT`。跟踪故障或 `system_state == kError` 返回 `CONTROLLER_ERROR`
 - **关节 streaming 或 Tool MoveL auto flush 激活时**返回 `CONTROLLER_ERROR`
 - MoveL 任一采样点越过配置的平面墙，返回 `TARGET_OUT_OF_RANGE (-5)`；逆运动学求解失败，返回 `LINEAR_PATH_FAILED (-6)`。SDK 收到规划失败后立即返回，不等待 30 秒。
 

@@ -1,4 +1,4 @@
-"""单臂蓝莓采摘流程：sensing → MoveL 伸出 → MoveJ 回 sensing → place（暂跳过 init）。
+"""单臂蓝莓采摘流程：sensing → MoveL 伸出 → J7 旋转 90° → MoveJ 回 sensing → place。
 
 关节角单位为弧度。默认左臂，单个 ControlApi。每段 speed_ratio / acc_time
 在文件顶部 SEGMENT_SPEEDS 中配置，也可用命令行覆盖。
@@ -22,27 +22,30 @@ import dual_arm_v2_2_sdk as sdk
 from example_common import check, config_path, wait_for_joints
 
 DEFAULT_LEFT_CONFIG = (
-    "/home/delia/dual_arm/cuarm_panel_control_left/cuarm_configuration/dual_v2_2")
+    "/home/delia/dual_arm/cuarm_panel_control/cuarm_configuration/dual_v2_2")
 DEFAULT_RIGHT_CONFIG = (
-    "/home/delia/dual_arm/cuarm_panel_control_right/cuarm_configuration/dual_v2_2")
+    "/home/delia/dual_arm/cuarm_panel_control/cuarm_configuration/dual_v2_2")
 
 # --- 路点（rad）---
 # INIT_POSE = [1.57, -0.52, -0.0, 1.72, 0.0, 1.3, 0.0]
 SENSING_POSE = [1.57, -0.197, -0.197, 1.52, 0.12, 1.03, 0.174]
 PLACE_POSE = [0.5909, -0.2404, -0.1558, 1.9624, 0.1199, 1.1174, 0.1201]
+#PLACE_POSE = [0.41905355, -0.23998277, 0.44121923, 1.80065619, -0.00034907, 1.33395515, 1.15087011]
 
 # MoveL 往返增量，与 dual_two_control_api.py 默认一致（位置 m，欧拉 deg，工具系 XYZ）。
 DPOS_M = [0.0, 0.10, 0.0]
+# DRPY_DEG = [0.0, 0.0, 0.0]
 DRPY_DEG = [0.0, 0.0, 0.0]
 
 # 每段速度。joint_speed / line_speed 为 move_joint / move_line 的 speed_ratio（0..100）。
 # line_acc 为 move_line 的 acc_time（秒）；0 表示用 config.yaml。
 SEGMENT_SPEEDS = {
-    "to_init": {"joint_speed": 60},
-    "to_sensing": {"joint_speed": 60},
-    "movel_out": {"line_speed": 60, "line_acc": 0.0},
-    "back_to_sensing": {"joint_speed": 60},
-    "to_place": {"joint_speed": 60},
+    "to_init": {"joint_speed": 100},
+    "to_sensing": {"joint_speed": 100},
+    "movel_out": {"line_speed": 100, "line_acc": 0.0},
+    "rotate_j7": {"joint_speed": 100},
+    "back_to_sensing": {"joint_speed": 100},
+    "to_place": {"joint_speed": 100},
 }
 
 ARMS = {
@@ -165,6 +168,8 @@ def parse_args(argv):
                         default=SEGMENT_SPEEDS["to_sensing"]["joint_speed"])
     parser.add_argument("--speed-line-out", type=int,
                         default=SEGMENT_SPEEDS["movel_out"]["line_speed"])
+    parser.add_argument("--speed-joint-rotate-j7", type=int,
+                        default=SEGMENT_SPEEDS["rotate_j7"]["joint_speed"])
     parser.add_argument("--speed-joint-back", type=int,
                         default=SEGMENT_SPEEDS["back_to_sensing"]["joint_speed"])
     parser.add_argument("--acc-line-out", type=float,
@@ -186,6 +191,7 @@ def main():
         "to_init": args.speed_joint_to_init,
         "to_sensing": args.speed_joint_to_sensing,
         "movel_out": (args.speed_line_out, args.acc_line_out),
+        "rotate_j7": args.speed_joint_rotate_j7,
         "back_to_sensing": args.speed_joint_back,
         "to_place": args.speed_joint_to_place,
     }
@@ -221,6 +227,27 @@ def main():
     if not timed_move_line(api, group, movel_target, line_out_sp, line_out_acc,
                            "movel_out", timings):
         return 1
+
+    code, joints = api.get_joint(group)
+    if not check(code, "get_joint@movel_out") or len(joints) != 7:
+        return 1
+    lower = api.get_joint_min_limit(group)
+    upper = api.get_joint_max_limit(group)
+    if len(lower) != 7 or len(upper) != 7:
+        print("读取 J7 关节软限位失败。", file=sys.stderr)
+        return 1
+    rotation = math.pi / 2
+    j7_target = next((angle for angle in (joints[6] + rotation, joints[6] - rotation)
+                      if lower[6] <= angle <= upper[6]), None)
+    if j7_target is None:
+        print("J7 在关节软限位内无法旋转 90°。", file=sys.stderr)
+        return 1
+    rotate_target = list(joints)
+    rotate_target[6] = j7_target
+    if not timed_move_joint(api, group, rotate_target, speeds["rotate_j7"],
+                            "rotate_j7", timings):
+        return 1
+
     if not timed_move_joint(api, group, SENSING_POSE, speeds["back_to_sensing"],
                             "back_to_sensing", timings):
         return 1

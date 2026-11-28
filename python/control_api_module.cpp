@@ -80,7 +80,7 @@ PYBIND11_MODULE(dual_arm_v2_2_sdk, m) {
              py::arg("acc_time") = 0.0f, py::call_guard<py::gil_scoped_release>(),
              "Blocking Cartesian straight line (kTaskLine) to an absolute tool "
              "pose. After the controller ack, waits until each commanded tool is "
-             "within 0.5 mm and 0.01 deg for 3 samples, or TIMEOUT at 20 s. "
+             "within 0.5 mm and 0.1 deg for 3 samples, or TIMEOUT at 20 s. "
              "Rejected while joint or tool-line auto-flush streaming is active.")
 
         // --- D. Joint streaming: cache + manual flush + fixed-rate sender ---
